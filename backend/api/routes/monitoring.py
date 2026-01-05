@@ -1,183 +1,121 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
-from sqlalchemy.orm import Session
-import json
-import base64
+"""
+API Routes for AI Monitoring
+Location: backend/api/routes/monitoring.py
+"""
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
 from datetime import datetime
-import asyncio
-from .websocket import manager  # The '.' means "from the same directory"
-from database.database import get_db
-from database.models import Submission, CheatingEvent
+
+# Import your existing auth dependencies
+# from backend.auth import get_current_user  # Adjust import as needed
+
+# Import AI monitoring system
 from services.ai_monitoring import ai_monitor
 
 
-router = APIRouter()
+router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
+
+# Request Models
+class FrameProcessRequest(BaseModel):
+    frame: str  # base64 encoded image
+    timestamp: str
+
+
+class AudioProcessRequest(BaseModel):
+    audio: str  # base64 encoded audio
+    timestamp: str
+
+
+class TabSwitchRequest(BaseModel):
+    is_focused: bool
+    duration: Optional[int] = 0
+    timestamp: str
+
+
+class AutoSubmitRequest(BaseModel):
+    reason: str
+    violations: List[dict]
+    timestamp: str
+
+
+# Routes
 @router.post("/frame/{submission_id}")
 async def process_frame(
-    submission_id: int,
-    frame_data: dict,
-    db: Session = Depends(get_db)
+    submission_id: str,
+    request: FrameProcessRequest
+    # current_user: dict = Depends(get_current_user)  # Uncomment if you have auth
 ):
-    """
-    Process a single frame for cheating detection
-    """
+    """Process video frame for cheating detection"""
     try:
-        # Get submission
-        submission = db.query(Submission).filter(Submission.id == submission_id).first()
-        if not submission:
-            raise HTTPException(status_code=404, detail="Submission not found")
-        
-        # Process frame
-        frame_base64 = frame_data.get("frame")
-        if not frame_base64:
-            raise HTTPException(status_code=400, detail="No frame data provided")
-        
-        result = ai_monitor.process_frame(frame_base64, str(submission.student_id))
-        
-        # Save cheating events if any violations
-        if "violations" in result and result["violations"]:
-            for violation in result["violations"]:
-                cheating_event = CheatingEvent(
-                    submission_id=submission_id,
-                    event_type=violation["type"],
-                    severity=violation["severity"],
-                    confidence=violation["confidence"],
-                    timestamp=datetime.fromisoformat(violation["timestamp"])
-                )
-                db.add(cheating_event)
-            
-            # Update submission cheating count
-            submission.cheating_count = (submission.cheating_count or 0) + len(result["violations"])
-            submission.warnings = (submission.warnings or []) + result["violations"]
-            db.commit()
-        
+        result = ai_monitor.process_frame(request.frame, submission_id)
         return result
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/audio/{submission_id}")
 async def process_audio(
-    submission_id: int,
-    audio_data: dict,
-    db: Session = Depends(get_db)
+    submission_id: str,
+    request: AudioProcessRequest
+    # current_user: dict = Depends(get_current_user)
 ):
-    """
-    Process audio chunk for cheating detection
-    """
+    """Process audio for voice detection"""
     try:
-        # Get submission
-        submission = db.query(Submission).filter(Submission.id == submission_id).first()
-        if not submission:
-            raise HTTPException(status_code=404, detail="Submission not found")
-        
-        # Process audio
-        audio_base64 = audio_data.get("audio")
-        if not audio_base64:
-            raise HTTPException(status_code=400, detail="No audio data provided")
-        
-        result = ai_monitor.process_audio(audio_base64, str(submission.student_id))
-        
-        # Save cheating events if any violations
-        if "violations" in result and result["violations"]:
-            for violation in result["violations"]:
-                cheating_event = CheatingEvent(
-                    submission_id=submission_id,
-                    event_type=violation["type"],
-                    severity=violation["severity"],
-                    confidence=violation["confidence"],
-                    timestamp=datetime.fromisoformat(violation["timestamp"])
-                )
-                db.add(cheating_event)
-            
-            # Update submission cheating count
-            submission.cheating_count = (submission.cheating_count or 0) + len(result["violations"])
-            submission.warnings = (submission.warnings or []) + result["violations"]
-            db.commit()
-        
+        result = ai_monitor.process_audio(request.audio, submission_id)
         return result
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/events/{submission_id}")
-async def get_cheating_events(
-    submission_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Get cheating events for a submission
-    """
-    events = db.query(CheatingEvent).filter(
-        CheatingEvent.submission_id == submission_id
-    ).order_by(CheatingEvent.timestamp.desc()).all()
-    
-    return [
-        {
-            "id": event.id,
-            "event_type": event.event_type,
-            "severity": event.severity,
-            "confidence": event.confidence,
-            "timestamp": event.timestamp.isoformat()
-        }
-        for event in events
-    ]
 
 @router.post("/tab-switch/{submission_id}")
-async def report_tab_switch(
-    submission_id: int,
-    data: dict,
-    db: Session = Depends(get_db)
+async def check_tab_switch(
+    submission_id: str,
+    request: TabSwitchRequest
+    # current_user: dict = Depends(get_current_user)
 ):
-    """
-    Report tab switching/focus loss
-    """
+    """Check for tab switching"""
     try:
-        submission = db.query(Submission).filter(Submission.id == submission_id).first()
-        if not submission:
-            raise HTTPException(status_code=404, detail="Submission not found")
-        
-        is_focused = data.get("is_focused", True)
-        result = ai_monitor.check_tab_switch(str(submission.student_id), is_focused)
-        
-        if result.get("violations"):
-            for violation in result["violations"]:
-                cheating_event = CheatingEvent(
-                    submission_id=submission_id,
-                    event_type=violation["type"],
-                    severity=violation["severity"],
-                    confidence=violation["confidence"],
-                    timestamp=datetime.fromisoformat(violation["timestamp"])
-                )
-                db.add(cheating_event)
-            
-            submission.cheating_count = (submission.cheating_count or 0) + len(result["violations"])
-            submission.warnings = (submission.warnings or []) + result["violations"]
-            db.commit()
-        
+        result = ai_monitor.check_tab_switch(submission_id, request.is_focused)
         return result
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/auto-submit/{submission_id}")
-async def auto_submit_exam(
-    submission_id: int,
-    reason: str,
-    db: Session = Depends(get_db)
+async def log_auto_submit(
+    submission_id: str,
+    request: AutoSubmitRequest
+    # current_user: dict = Depends(get_current_user)
 ):
-    """
-    Auto-submit exam due to cheating violations
-    """
-    submission = db.query(Submission).filter(Submission.id == submission_id).first()
-    if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
-    
-    submission.status = "completed"
-    submission.auto_submitted = True
-    submission.auto_submit_reason = reason
-    submission.submitted_at = datetime.utcnow()
-    
-    db.commit()
-    
-    return {"message": f"Exam auto-submitted: {reason}"}
+    """Log auto-submission due to violations"""
+    try:
+        # Here you can save to database
+        # For now, just log it
+        print(f"🚨 Auto-submit: {submission_id} - {request.reason}")
+        print(f"   Violations: {len(request.violations)}")
+        
+        return {
+            "status": "success",
+            "message": "Auto-submission recorded",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/status")
+async def get_monitoring_status():
+    """Get monitoring system status"""
+    return {
+        "status": "active",
+        "timestamp": datetime.now().isoformat(),
+        "detectors": {
+            "faces": ai_monitor.face_detector is not None,
+            "head_pose": ai_monitor.head_pose_estimator is not None,
+            "phone": ai_monitor.phone_detector is not None,
+            "audio": ai_monitor.audio_analyzer is not None
+        }
+    }

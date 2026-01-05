@@ -1,7 +1,8 @@
 // config.js — Codespaces / Cloud Backend Configuration
 
 // 🔹 Backend base URL (Codespaces)
-window.API_BASE_URL ="https://probable-space-goggles-69596vjpvg9wcr474-8000.app.github.dev/api";
+window.API_BASE_URL =
+  "https://probable-space-goggles-69596vjpvg9wcr474-8000.app.github.dev/api";
 
 
 console.log("✅ Using backend:", window.API_BASE_URL);
@@ -9,7 +10,7 @@ console.log("✅ Using backend:", window.API_BASE_URL);
 // 🔹 Health check on page load
 window.addEventListener("load", async () => {
   try {
-    const response = await fetch("https://probable-space-goggles-69596vjpvg9wcr474-8000.app.github.dev/health")
+    const response = await fetch("https://probable-space-goggles-69596vjpvg9wcr474-8000.app.github.dev/health");
 
 
     if (response.ok) {

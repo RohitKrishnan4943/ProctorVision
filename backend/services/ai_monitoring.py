@@ -1,212 +1,213 @@
 """
-SIMULATED AI Monitoring System
-No OpenCV, No MediaPipe, No YOLO - Just simulation for demo
+ProctorVision AI Monitoring System
+Stable backend-safe implementation
+
+NOTE:
+- MediaPipe is optional
+- YOLO is conditionally enabled
+- Prevents PyTorch 2.6 crashes
 """
 
-import base64
-import random
-import json
-from datetime import datetime
-from PIL import Image
-import io
+import cv2
 import numpy as np
+import base64
+from datetime import datetime
+from collections import deque
+import time
+import os
 
+# ===================== MEDIAPIPE (OPTIONAL) =====================
+FACE_DETECTION = None
+FACE_MESH = None
+
+try:
+    import mediapipe as mp
+    if hasattr(mp, "solutions"):
+        FACE_DETECTION = mp.solutions.face_detection
+        FACE_MESH = mp.solutions.face_mesh
+except Exception:
+    pass
+
+
+# ===================== AUDIO =====================
+import webrtcvad
+
+
+# ===================== CONFIG =====================
+class DetectionConfig:
+    FACE_MIN_CONSECUTIVE_FRAMES = 3
+    FACE_CONFIDENCE_THRESHOLD = 0.7
+    FACE_COOLDOWN_PERIOD = 30
+
+    HEAD_ALLOWED_ANGLE = 35
+    HEAD_VIOLATION_THRESHOLD = 25
+
+    PHONE_CONFIDENCE_THRESHOLD = 0.75
+    PHONE_MAX_OBJECT_SIZE = 0.15
+
+    AUDIO_CONFIDENCE_THRESHOLD = 0.65
+
+
+# ===================== TRACKER =====================
+class ViolationTracker:
+    def __init__(self):
+        self.last = {}
+        self.counts = {}
+
+    def add(self, key):
+        self.counts[key] = self.counts.get(key, 0) + 1
+
+    def reset(self, key):
+        self.counts[key] = 0
+
+    def ready(self, key, cooldown):
+        return time.time() - self.last.get(key, 0) >= cooldown
+
+    def trigger(self, key):
+        self.last[key] = time.time()
+
+
+# ===================== FACE =====================
+class FaceDetector:
+    def __init__(self):
+        self.enabled = FACE_DETECTION is not None
+        if self.enabled:
+            self.detector = FACE_DETECTION.FaceDetection(
+                model_selection=0,
+                min_detection_confidence=DetectionConfig.FACE_CONFIDENCE_THRESHOLD
+            )
+
+    def detect(self, frame):
+        if not self.enabled:
+            return 0, 0.0
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res = self.detector.process(rgb)
+        if res.detections:
+            return len(res.detections), max(d.score[0] for d in res.detections)
+        return 0, 0.0
+
+
+# ===================== HEAD =====================
+class HeadPoseEstimator:
+    def __init__(self):
+        self.enabled = FACE_MESH is not None
+        if self.enabled:
+            self.mesh = FACE_MESH.FaceMesh(
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+
+    def estimate(self, frame):
+        if not self.enabled:
+            return None
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res = self.mesh.process(rgb)
+        if not res.multi_face_landmarks:
+            return None
+        lm = res.multi_face_landmarks[0].landmark
+        left, right, nose = lm[33], lm[263], lm[1]
+        return (nose.x - ((left.x + right.x) / 2)) * 180
+
+
+# ===================== PHONE (SAFE MODE) =====================
+class PhoneDetector:
+    def __init__(self):
+        self.enabled = False
+        try:
+            from ultralytics import YOLO
+            self.model = YOLO("yolov8n.pt")
+            self.phone_class = 67
+            self.enabled = True
+        except Exception as e:
+            print("⚠️ Phone detection disabled (PyTorch/YOLO incompatibility)")
+            print(f"   Reason: {e}")
+
+    def detect(self, frame):
+        if not self.enabled:
+            return False, 0.0, 0.0
+
+        results = self.model(frame, verbose=False)
+        for r in results:
+            for box in r.boxes:
+                if int(box.cls[0]) == self.phone_class:
+                    conf = float(box.conf[0])
+                    if conf >= DetectionConfig.PHONE_CONFIDENCE_THRESHOLD:
+                        x1, y1, x2, y2 = box.xyxy[0]
+                        area = (x2 - x1) * (y2 - y1)
+                        return True, conf, area / (frame.shape[0] * frame.shape[1])
+        return False, 0.0, 0.0
+
+
+# ===================== AUDIO =====================
+class AudioAnalyzer:
+    def __init__(self):
+        self.vad = webrtcvad.Vad(2)
+        self.buf = deque(maxlen=30)
+
+    def detect(self, audio):
+        speech = self.vad.is_speech(audio[:960], 16000)
+        self.buf.append(speech)
+        return speech, sum(self.buf) / len(self.buf)
+
+
+# ===================== MAIN =====================
 class AIMonitoringSystem:
     def __init__(self):
-        print("🚀 Starting SIMULATED AI Monitoring System")
-        print("✅ Running in DEMO MODE - Simulating cheating detection")
-        
-        # Track violations per student
-        self.violation_history = {}
-        
-        # Simulation settings
-        self.violation_chances = {
-            "face_not_visible": 0.15,      # 15% chance
-            "multiple_faces": 0.08,        # 8% chance
-            "looking_away": 0.20,          # 20% chance
-            "prohibited_object": 0.05,     # 5% chance
-            "talking_detected": 0.10,      # 10% chance
-            "tab_switch": 1.0              # 100% if tab switched
-        }
-        
-        print("✅ AI Monitoring ready (Simulation Mode)")
-    
-    def _get_student_seed(self, student_id):
-        """Create consistent random seed based on student ID"""
-        return hash(student_id) % 1000
-    
-    def process_frame(self, frame_base64: str, student_id: str):
-        """
-        Simulate frame processing - NO OPENCV REQUIRED
-        """
-        try:
-            violations = []
-            
-            # Set seed for consistent randomness per student
-            seed = self._get_student_seed(student_id) + int(datetime.now().timestamp() / 30)
-            random.seed(seed)
-            
-            # Try to decode base64 for realism (but not required)
-            try:
-                # Just decode to verify it's valid base64
-                image_data = base64.b64decode(frame_base64)
-                # You could use PIL here if needed, but not required
-                # image = Image.open(io.BytesIO(image_data))
-                frame_valid = True
-            except:
-                frame_valid = False
-            
-            # SIMULATE FACE DETECTION
-            if random.random() < self.violation_chances["face_not_visible"]:
-                violations.append({
-                    "type": "face_not_visible",
-                    "severity": "medium",
-                    "confidence": round(random.uniform(0.6, 0.9), 2),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": "No face detected. Please keep your face visible."
-                })
-            
-            # SIMULATE MULTIPLE FACES
-            elif random.random() < self.violation_chances["multiple_faces"]:
-                violations.append({
-                    "type": "multiple_faces",
-                    "severity": "high",
-                    "confidence": round(random.uniform(0.7, 0.95), 2),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": f"Multiple faces detected ({random.randint(2, 4)} faces)."
-                })
-            
-            # SIMULATE LOOKING AWAY
-            elif random.random() < self.violation_chances["looking_away"]:
-                directions = ["left", "right", "down", "up"]
-                violations.append({
-                    "type": "looking_away",
-                    "severity": "low",
-                    "confidence": round(random.uniform(0.5, 0.8), 2),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": f"Looking {random.choice(directions)}. Please focus on screen."
-                })
-            
-            # SIMULATE PROHIBITED OBJECTS
-            elif random.random() < self.violation_chances["prohibited_object"]:
-                objects = ["mobile phone", "book", "notes", "earphones", "second device"]
-                violations.append({
-                    "type": "prohibited_object",
-                    "severity": "high",
-                    "confidence": round(random.uniform(0.65, 0.9), 2),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": f"Prohibited item detected: {random.choice(objects)}"
-                })
-            
-            # Track for this student
-            if student_id not in self.violation_history:
-                self.violation_history[student_id] = []
-            
-            self.violation_history[student_id].extend(violations)
-            
-            return {
-                "status": "success",
-                "timestamp": datetime.now().isoformat(),
-                "violations": violations,
-                "face_count": 0 if violations and violations[0]["type"] == "face_not_visible" else 1,
-                "frame_valid": frame_valid,
-                "total_violations": len(self.violation_history.get(student_id, [])),
-                "message": "Frame processed in simulation mode"
-            }
-            
-        except Exception as e:
-            return {
-                "status": "error",
-                "timestamp": datetime.now().isoformat(),
-                "violations": [],
-                "error": str(e),
-                "message": "Using fallback simulation"
-            }
-    
-    def process_audio(self, audio_base64: str, student_id: str):
-        """
-        Simulate audio processing
-        """
-        try:
-            violations = []
-            
-            # Set seed
-            seed = self._get_student_seed(student_id) + int(datetime.now().timestamp() / 20)
-            random.seed(seed)
-            
-            # SIMULATE TALKING DETECTION
-            if random.random() < self.violation_chances["talking_detected"]:
-                violations.append({
-                    "type": "talking_detected",
-                    "severity": "medium",
-                    "confidence": round(random.uniform(0.4, 0.8), 2),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": "Talking or audio detected. Please maintain silence."
-                })
-            
-            # SIMULATE BACKGROUND NOISE
-            elif random.random() < 0.05:  # 5% chance
-                violations.append({
-                    "type": "background_noise",
-                    "severity": "low",
-                    "confidence": round(random.uniform(0.3, 0.6), 2),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": "Unusual background noise detected."
-                })
-            
-            return {
-                "status": "success",
-                "timestamp": datetime.now().isoformat(),
-                "violations": violations,
-                "audio_level": round(random.uniform(0.1, 0.9), 2),
-                "message": "Audio processed in simulation mode"
-            }
-            
-        except Exception as e:
-            return {
-                "status": "error",
-                "timestamp": datetime.now().isoformat(),
-                "violations": [],
-                "error": str(e)
-            }
-    
-    def check_tab_switch(self, student_id: str, is_focused: bool):
-        """
-        Check tab switching (real detection, not simulated)
-        """
+        print("🚀 Initializing AI Monitoring System...")
+
+        self.tracker = ViolationTracker()
+        self.face = FaceDetector()
+        self.pose = HeadPoseEstimator()
+        self.phone = PhoneDetector()
+        self.audio = AudioAnalyzer()
+        self.head_time = {}
+
+        print("✅ Face detection:", "enabled" if self.face.enabled else "disabled")
+        print("✅ Head pose:", "enabled" if self.pose.enabled else "disabled")
+        print("✅ Phone detection:", "enabled" if self.phone.enabled else "disabled")
+        print("✅ Audio detection enabled")
+        print("✅ AI Monitoring System ready!")
+
+    def process_frame(self, frame_b64, student_id):
+        frame = cv2.imdecode(
+            np.frombuffer(base64.b64decode(frame_b64.split(",")[-1]), np.uint8),
+            cv2.IMREAD_COLOR
+        )
+
         violations = []
-        
-        if not is_focused:
-            violations.append({
-                "type": "tab_switch",
-                "severity": "medium",
-                "confidence": 1.0,
-                "timestamp": datetime.now().isoformat(),
-                "message": "Tab switching detected. Please stay on exam page."
-            })
-        
+
+        faces, conf = self.face.detect(frame)
+        if faces > 1:
+            violations.append({"type": "multiple_faces", "confidence": conf})
+
+        yaw = self.pose.estimate(frame)
+        if yaw and abs(yaw) > DetectionConfig.HEAD_ALLOWED_ANGLE:
+            violations.append({"type": "looking_away"})
+
+        detected, conf, size = self.phone.detect(frame)
+        if detected and size <= DetectionConfig.PHONE_MAX_OBJECT_SIZE:
+            violations.append({"type": "phone_detected", "confidence": conf})
+
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
             "violations": violations
         }
-    
-    def get_student_report(self, student_id: str):
-        """Get violation report for student"""
-        violations = self.violation_history.get(student_id, [])
-        
-        # Count by type
-        counts = {}
-        for v in violations:
-            counts[v["type"]] = counts.get(v["type"], 0) + 1
-        
-        return {
-            "student_id": student_id,
-            "total_violations": len(violations),
-            "violations_by_type": counts,
-            "latest_violations": violations[-10:] if len(violations) > 10 else violations,
-            "auto_submit_warning": len(violations) >= 3  # Warn if close to auto-submit
-        }
 
-# Create global instance
+    def process_audio(self, audio_b64, student_id):
+        audio = base64.b64decode(audio_b64.split(",")[-1])
+        speech, conf = self.audio.detect(audio)
+        if speech and conf >= DetectionConfig.AUDIO_CONFIDENCE_THRESHOLD:
+            return {"violations": [{"type": "voice_detected", "confidence": conf}]}
+        return {"violations": []}
+
+
+# ===================== GLOBAL =====================
 ai_monitor = AIMonitoringSystem()
+
+
+
+
+

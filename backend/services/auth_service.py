@@ -4,73 +4,85 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 from database.models import User
-from database.database import SessionLocal
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Security configurations
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+# ===================== SECURITY CONFIG =====================
+SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 🔥 USE ARGON2 (NO PASSWORD LENGTH LIMIT)
+pwd_context = CryptContext(
+    schemes=["argon2"],
+    deprecated="auto",
+)
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
+# ===================== PASSWORD =====================
+def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+# ===================== TOKEN =====================
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = (
+        datetime.utcnow() + expires_delta
+        if expires_delta
+        else datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+# ===================== AUTH =====================
 def authenticate_user(db, email: str, password: str):
     user = db.query(User).filter(User.email == email).first()
     if not user:
         return False
+
     if not verify_password(password, user.hashed_password):
         return False
+
     if user.status != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive"
+            detail="Account is inactive",
         )
+
     return user
+
+# ===================== USER CREATION =====================
 def create_user(db, email: str, password: str, name: str, role: str):
-    # Check if user already exists
-    existing_user = db.query(User).filter(User.email == email).first()
-    if existing_user:
+    if db.query(User).filter(User.email == email).first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
+            detail="User with this email already exists",
         )
-    
-    # Create new user
-    hashed_password = get_password_hash(password)
+
+    if role not in ["student", "teacher", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role",
+        )
+
     user = User(
         email=email,
         name=name,
-        hashed_password=hashed_password,
+        hashed_password=get_password_hash(password),
         role=role,
-        status="active"
+        status="active",
     )
-    
+
     db.add(user)
     db.commit()
     db.refresh(user)
-    
-    # Create access token
-    access_token = create_access_token(data={"sub": email})
-    
+
+    access_token = create_access_token({"sub": user.email})
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -78,68 +90,28 @@ def create_user(db, email: str, password: str, name: str, role: str):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role
-        }
+            "role": user.role,
+        },
     }
+
+# ===================== CURRENT USER =====================
 def get_current_user(token: str, db):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
+        email = payload.get("sub")
         if email is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise credentials_exception
-    return user
 
-def create_user(db, email: str, password: str, name: str, role: str):
-    # Check if user already exists
-    existing_user = db.query(User).filter(User.email == email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
-        )
-    
-    # Validate role
-    if role not in ["student", "teacher", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role"
-        )
-    
-    # Create new user
-    hashed_password = get_password_hash(password)
-    user = User(
-        email=email,
-        name=name,
-        hashed_password=hashed_password,
-        role=role,
-        status="active"
-    )
-    
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    
-    # Create access token
-    access_token = create_access_token(data={"sub": email})
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role
-        }
-    }
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise credentials_exception
+
+    return user

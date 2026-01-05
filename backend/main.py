@@ -47,13 +47,32 @@ app = FastAPI(
 )
 
 # ===================== CORS (FIXED & SAFE) =====================
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://.*\.github\.dev",
-    allow_credentials=True,
+    allow_origins=[
+        "https://probable-space-goggles-69596vjpvg9wcr474-5502.app.github.dev",
+        "https://probable-space-goggles-69596vjpvg9wcr474-8000.preview.app.github.dev",
+    ],
+    allow_credentials=False,  # IMPORTANT
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 
 
 
