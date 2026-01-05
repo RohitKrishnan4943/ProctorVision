@@ -1,29 +1,44 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-import uvicorn
 import os
 from dotenv import load_dotenv
 
 from database.database import engine, Base
-from api.routes import auth, exams, monitoring, admin
-from api.websocket import manager
+from api.routes.auth import router as auth_router
+from api.routes.exams import router as exams_router
+from api.routes.monitoring import router as monitoring_router
+from api.routes.admin import router as admin_router
+from api.routes.websocket import manager
 
 # Load environment variables
 load_dotenv()
 
-# Create tables
+# ===================== LIFESPAN =====================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    print("Starting up...")
+    print("🚀 Starting Exam System Backend...")
+    print("📊 Creating database tables...")
     Base.metadata.create_all(bind=engine)
-    yield
-    # Shutdown
-    print("Shutting down...")
+    print("✅ Database tables created successfully!")
 
-# Create FastAPI app
+    print("\n" + "=" * 60)
+    print("🌐 SERVER IS READY!")
+    print("=" * 60)
+
+    codespace_name = os.getenv("CODESPACE_NAME", "")
+    if codespace_name:
+        print(f"\n📌 Codespace: {codespace_name}")
+        print(f"🔗 Backend URL: https://{codespace_name}-8000.preview.app.github.dev")
+        print(f"📚 Docs: https://{codespace_name}-8000.preview.app.github.dev/docs")
+    else:
+        print("\n🔗 Local Backend URL: http://localhost:8000")
+
+    print("\n✅ Waiting for connections...")
+    yield
+    print("\n🛑 Shutting down backend...")
+
+# ===================== APP =====================
 app = FastAPI(
     title="Exam System Backend",
     description="AI-powered Online Examination System with Cheating Detection",
@@ -31,32 +46,30 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
+# ===================== CORS (FIXED & SAFE) =====================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:5500"],  # Frontend URLs
+    allow_origin_regex=r"https://.*\.github\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(exams.router, prefix="/api/exams", tags=["Exams"])
-app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoring"])
-app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
-# WebSocket endpoint for real-time monitoring
+# ===================== ROUTERS =====================
+app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(exams_router, prefix="/api/exams", tags=["Exams"])
+app.include_router(monitoring_router, prefix="/api/monitoring", tags=["Monitoring"])
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
+
+# ===================== WEBSOCKET =====================
 @app.websocket("/ws/monitoring/{student_id}/{exam_id}")
 async def websocket_endpoint(websocket: WebSocket, student_id: str, exam_id: str):
     await manager.connect(websocket, student_id, exam_id)
     try:
         while True:
             data = await websocket.receive_json()
-            # Process incoming data (frames, audio, etc.)
             await manager.process_data(student_id, exam_id, data)
     except WebSocketDisconnect:
         manager.disconnect(student_id, exam_id)
@@ -64,24 +77,22 @@ async def websocket_endpoint(websocket: WebSocket, student_id: str, exam_id: str
         print(f"WebSocket error: {e}")
         manager.disconnect(student_id, exam_id)
 
-# Health check endpoint
+# ===================== HEALTH =====================
 @app.get("/")
 async def root():
     return {
         "message": "Exam System Backend",
         "version": "1.0.0",
-        "status": "running"
+        "status": "running",
+        "docs": "/docs",
+        "endpoints": {
+            "auth": "/api/auth",
+            "exams": "/api/exams",
+            "monitoring": "/api/monitoring",
+            "admin": "/api/admin"
+        }
     }
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+async def health():
+    return {"status": "healthy", "database": "connected"}

@@ -12,7 +12,7 @@
         <div class="auth-box">
             <div class="logo">
                 <i class="fas fa-graduation-cap"></i>
-                <h1>ExamPro</h1>
+                <h1>ProctorVision</h1>
             </div>
             
             <h2>Create Account</h2>
@@ -35,12 +35,18 @@
                 
                 <div class="input-group">
                     <label for="role">I am a</label>
-                    <select id="role" required>
+                    <select id="role" required onchange="toggleAdminPassword()">
                         <option value="">Select Role</option>
                         <option value="student">Student</option>
                         <option value="teacher">Teacher</option>
                         <option value="admin">Admin</option>
                     </select>
+                </div>
+                
+                <div class="input-group" id="adminPasswordGroup" style="display: none;">
+                    <label for="adminPassword">Admin Password *</label>
+                    <input type="password" id="adminPassword" placeholder="Enter admin password">
+                    
                 </div>
                 
                 <button type="submit" class="btn btn-primary">
@@ -57,5 +63,27 @@
     </div>
     
     <script src="js/auth.js"></script>
+    <script>
+        function toggleAdminPassword() {
+            const role = document.getElementById('role').value;
+            const adminPasswordGroup = document.getElementById('adminPasswordGroup');
+            
+            if (role === 'admin') {
+                adminPasswordGroup.style.display = 'block';
+                document.getElementById('adminPassword').required = true;
+            } else {
+                adminPasswordGroup.style.display = 'none';
+                document.getElementById('adminPassword').required = false;
+            }
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            if (document.getElementById('role')) {
+                toggleAdminPassword();
+            }
+        });
+    </script>
+    <script src="js/config.js"></script>
 </body>
 </html>

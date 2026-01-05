@@ -1,6 +1,105 @@
 // Check authentication
+// student.js - UPDATED VERSION
+
+// Check authentication
 checkAuth();
 const currentUser = getCurrentUser();
+
+// Get token
+const token = localStorage.getItem('token');
+
+// Validate and start exam - UPDATED
+async function validateAndStartExam(examCode) {
+    try {
+        console.log("🔍 Validating exam code:", examCode);
+        
+        // Get exam details from backend
+        const response = await fetch(`${window.API_BASE_URL}/exams/${examCode}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const exam = await response.json();
+            
+            // Check if student already has a submission
+            const submissionsResponse = await checkExistingSubmission(exam.id);
+            
+            if (submissionsResponse && submissionsResponse.status === 'completed') {
+                showAccessModal('Already Completed', 
+                    `You have already completed this exam.\n\nScore: ${submissionsResponse.score || 'N/A'}`,
+                    'info');
+                return;
+            }
+            
+            // Show exam instructions
+            showExamInstructions(exam);
+            
+        } else {
+            const errorData = await response.json();
+            showAccessModal('Exam Not Found', errorData.detail || `No exam found with code: ${examCode}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error validating exam:', error);
+        showAccessModal('Error', 'Network error. Please try again.', 'error');
+    }
+}
+
+// Start exam with backend
+async function startExamWithCode(examId) {
+    if (!examId) {
+        alert('No exam selected!');
+        return;
+    }
+    
+    try {
+        // Start exam via backend (creates a submission)
+        const response = await fetch(`${window.API_BASE_URL}/exams/${examCode}/start`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Save submission ID for later
+            localStorage.setItem('currentSubmission', data.submission_id);
+            
+            // Close modal and redirect to exam page
+            closeModal('examAccessModal');
+            window.location.href = `exam.html?code=${currentExamCode}`;
+        } else {
+            const errorData = await response.json();
+            alert('Error starting exam: ' + (errorData.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error starting exam:', error);
+        alert('Network error. Please try again.');
+    }
+}
+
+// Helper function to check existing submission
+async function checkExistingSubmission(examId) {
+    try {
+        // You might need to implement this endpoint
+        const response = await fetch(`${window.API_BASE_URL}/exams/${examId}/submissions/me`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            return await response.json();
+        }
+        return null;
+    } catch (error) {
+        console.error('Error checking submission:', error);
+        return null;
+    }
+}
 
 // Store current exam ID for starting
 let currentExamId = null;

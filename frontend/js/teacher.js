@@ -1,7 +1,198 @@
+
+// Filter exams by status
+// teacher.js - UPDATED VERSION
+
 // Check authentication
 checkAuth();
 const currentUser = getCurrentUser();
-// Filter exams by status
+
+// Get token for API requests
+const token = localStorage.getItem('token');
+
+// Navigation function - Add API calls
+async function loadDashboardStats() {
+    try {
+        console.log("📊 Loading teacher dashboard stats...");
+        
+        const response = await fetch(`${window.API_BASE_URL}/exams/my-exams`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const exams = await response.json();
+            
+            // Update stats from backend data
+            document.getElementById('totalExams').textContent = exams.length;
+            
+            // Load recent exams table
+            const examsTable = document.getElementById('examsTable');
+            if (examsTable) {
+                const tbody = examsTable.getElementsByTagName('tbody')[0];
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    
+                    exams.slice(0, 5).forEach(exam => {
+                        const row = tbody.insertRow();
+                        row.innerHTML = `
+                            <td>${exam.title}</td>
+                            <td>${new Date(exam.created_at).toLocaleDateString()}</td>
+                            <td>${exam.submissions?.total || 0}</td>
+                            <td><span class="status completed">Active</span></td>
+                            <td>
+                                <button class="btn btn-primary" onclick="viewExamDetails('${exam.exam_code}')">
+                                    <i class="fas fa-eye"></i> View
+                                </button>
+                            </td>
+                        `;
+                    });
+                }
+            }
+        } else {
+            console.warn("Could not fetch exams from backend");
+            // Fallback to localStorage
+            const exams = JSON.parse(localStorage.getItem('exams')) || [];
+            const teacherExams = exams.filter(exam => exam.teacherId === currentUser.id);
+            document.getElementById('totalExams').textContent = teacherExams.length;
+        }
+    } catch (error) {
+        console.error("Error loading dashboard:", error);
+    }
+}
+
+// CREATE EXAM FUNCTION (Backend Version)
+async function handleCreateExam() {
+    console.log('📝 Creating exam...');
+    
+    const title = document.getElementById('examTitle').value;
+    const description = document.getElementById('examDescription').value;
+    const duration = parseInt(document.getElementById('examDuration').value);
+    const accessType = document.getElementById('accessType').value;
+    
+    // Collect questions
+    const questions = [];
+    const questionItems = document.querySelectorAll('.question-item');
+    
+    questionItems.forEach((item, index) => {
+        const questionText = item.querySelector('.question-text').value;
+        const marksInput = item.querySelector('.question-marks');
+        const marks = marksInput ? parseInt(marksInput.value) : 1;
+        
+        // Check if it's MCQ or Short Answer
+        const optionsContainer = item.querySelector('.options-container');
+        if (optionsContainer) {
+            // MCQ Question
+            const optionElements = item.querySelectorAll('.option-text');
+            const correctOption = item.querySelector(`input[name="correct${index + 1}"]:checked`);
+            
+            const options = [];
+            optionElements.forEach((opt, optIndex) => {
+                if (opt.value.trim()) {
+                    options.push({
+                        id: optIndex,
+                        text: opt.value.trim(),
+                        isCorrect: correctOption && parseInt(correctOption.value) === optIndex
+                    });
+                }
+            });
+            
+            questions.push({
+                type: 'mcq',
+                text: questionText,
+                options: options,
+                marks: marks
+            });
+        } else {
+            // Short Answer Question
+            const expectedAnswerInput = item.querySelector('.expected-answer');
+            const expectedAnswer = expectedAnswerInput ? expectedAnswerInput.value : '';
+            
+            questions.push({
+                type: 'short',
+                text: questionText,
+                expectedAnswer: expectedAnswer,
+                marks: marks
+            });
+        }
+    });
+    
+    // Validate that there's at least one question
+    if (questions.length === 0) {
+        alert('Please add at least one question!');
+        return;
+    }
+    
+    try {
+        console.log("🚀 Sending exam to backend...");
+        
+        const response = await fetch(`${window.API_BASE_URL}/exams/create`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                title: title,
+                description: description,
+                duration: duration,
+                questions: questions,
+                access_type: accessType,
+                allowed_students: [] // You can add student IDs here
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log("✅ Exam created:", data);
+            
+            // Generate exam link
+            const examLink = `${window.location.origin}/frontend/exam.html?code=${data.exam_code}`;
+            
+            // Show modal with link
+            const generatedLinkInput = document.getElementById('generatedLink');
+            if (generatedLinkInput) {
+                generatedLinkInput.value = examLink;
+            }
+            
+            const modal = document.getElementById('examLinkModal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+            
+            // Also save to localStorage for compatibility
+            const exams = JSON.parse(localStorage.getItem('exams')) || [];
+            exams.push({
+                id: 'EXAM' + Date.now(),
+                examCode: data.exam_code,
+                title: title,
+                description: description,
+                duration: duration,
+                questions: questions,
+                teacherId: currentUser.id,
+                teacherName: currentUser.name,
+                createdAt: new Date().toISOString(),
+                isActive: true,
+                accessType: accessType
+            });
+            localStorage.setItem('exams', JSON.stringify(exams));
+            
+            // Reset form
+            const form = document.getElementById('createExamForm');
+            if (form) form.reset();
+            
+            const questionsContainer = document.getElementById('questionsContainer');
+            if (questionsContainer) questionsContainer.innerHTML = '';
+            
+        } else {
+            const errorData = await response.json();
+            alert('Error creating exam: ' + (errorData.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error creating exam:', error);
+        alert('Network error. Please try again.');
+    }
+}
 let currentExamFilter = 'all';
 // Variables for batch delete
 let examsToDelete = [];

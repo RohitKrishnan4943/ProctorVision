@@ -45,7 +45,42 @@ def authenticate_user(db, email: str, password: str):
             detail="Account is inactive"
         )
     return user
-
+def create_user(db, email: str, password: str, name: str, role: str):
+    # Check if user already exists
+    existing_user = db.query(User).filter(User.email == email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this email already exists"
+        )
+    
+    # Create new user
+    hashed_password = get_password_hash(password)
+    user = User(
+        email=email,
+        name=name,
+        hashed_password=hashed_password,
+        role=role,
+        status="active"
+    )
+    
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": email})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role
+        }
+    }
 def get_current_user(token: str, db):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

@@ -4,11 +4,11 @@ import json
 import base64
 from datetime import datetime
 import asyncio
-
+from .websocket import manager  # The '.' means "from the same directory"
 from database.database import get_db
 from database.models import Submission, CheatingEvent
 from services.ai_monitoring import ai_monitor
-from api.websocket import manager
+
 
 router = APIRouter()
 

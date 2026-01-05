@@ -1,14 +1,111 @@
 // Check authentication
 checkAuth();
 const currentUser = getCurrentUser();
+
+// ✅ BACKEND API CONFIGURATION
+const API_BASE_URL = window.API_BASE_URL || "https://probable-space-goggles-8000.preview.app.github.dev/api";
+const token = localStorage.getItem('token');
+console.log("🌐 Admin using API:", API_BASE_URL);
+
 // Admin delete variables
 let adminExamsToDelete = [];
 let isAdminBatchDelete = false;
 
 // Enhanced loadAllExams function with checkboxes
-function loadAllExams() {
+async function loadAllExams() {
     console.log('Loading all exams...');
     
+    try {
+        // ✅ FETCH FROM BACKEND
+        const response = await fetch(`${API_BASE_URL}/admin/exams`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const exams = await response.json();
+            
+            // Filter exams
+            let filteredExams = [...exams];
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            if (currentExamFilter === 'active') {
+                filteredExams = exams.filter(exam => exam.is_active);
+            } else if (currentExamFilter === 'inactive') {
+                filteredExams = exams.filter(exam => !exam.is_active);
+            } else if (currentExamFilter === 'today') {
+                filteredExams = exams.filter(exam => {
+                    const examDate = new Date(exam.created_at);
+                    examDate.setHours(0, 0, 0, 0);
+                    return examDate.getTime() === today.getTime();
+                });
+            }
+            
+            // Display exams
+            const allExamsTable = document.getElementById('allExamsTable');
+            if (allExamsTable) {
+                const tbody = allExamsTable.getElementsByTagName('tbody')[0];
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    
+                    filteredExams.forEach(exam => {
+                        const row = tbody.insertRow();
+                        
+                        row.innerHTML = `
+                            <td>
+                                <input type="checkbox" class="admin-exam-checkbox" value="${exam.id}" onchange="adminUpdateDeleteButton()">
+                            </td>
+                            <td><strong>${exam.title}</strong></td>
+                            <td>${exam.teacher || 'Unknown'}</td>
+                            <td>
+                                <span class="status ${exam.is_active ? 'completed' : 'inactive'}">
+                                    ${exam.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                            </td>
+                            <td>${new Date(exam.created_at).toLocaleDateString()}</td>
+                            <td>${exam.duration} min</td>
+                            <td>${exam.questions_count || 0}</td>
+                            <td>${exam.submissions?.unique_students || 0}</td>
+                            <td>${exam.submissions?.total || 0}</td>
+                            <td>
+                                <span class="status ${exam.cheating?.cases > 0 ? 'cheating' : 'completed'}">
+                                    ${exam.cheating?.cases || 0}
+                                </span>
+                            </td>
+                            <td>
+                                <div style="display: flex; gap: 5px;">
+                                    <button class="btn btn-primary" onclick="viewAdminExamDetails('${exam.id}')" title="View Details">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="btn btn-danger" onclick="adminDeleteExamBackend('${exam.id}', '${exam.title}')" title="Delete">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        `;
+                    });
+                }
+            }
+        } else {
+            console.warn("Could not fetch exams from backend, using localStorage");
+            loadAllExamsFallback();
+        }
+    } catch (error) {
+        console.error("Error loading exams:", error);
+        loadAllExamsFallback();
+    }
+    
+    // Reset batch delete
+    adminExamsToDelete = [];
+    adminUpdateDeleteButton();
+    document.getElementById('adminSelectAllExams').checked = false;
+}
+
+// Fallback function
+function loadAllExamsFallback() {
     const exams = JSON.parse(localStorage.getItem('exams')) || [];
     const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
     const users = JSON.parse(localStorage.getItem('users')) || [];
@@ -80,11 +177,6 @@ function loadAllExams() {
             });
         }
     }
-    
-    // Reset batch delete
-    adminExamsToDelete = [];
-    adminUpdateDeleteButton();
-    document.getElementById('adminSelectAllExams').checked = false;
 }
 
 // Admin toggle select all exams
@@ -146,53 +238,93 @@ function adminDeleteMultipleExams() {
     document.getElementById('adminDeleteExamModal').style.display = 'flex';
 }
 
-// Admin confirm and delete exam(s)
-function adminConfirmDeleteExam() {
-    const exams = JSON.parse(localStorage.getItem('exams')) || [];
-    const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
-    const attempts = JSON.parse(localStorage.getItem('examAttempts')) || [];
-    
-    let deletedCount = 0;
-    
-    adminExamsToDelete.forEach(examId => {
-        // Find exam index
-        const examIndex = exams.findIndex(e => e.id === examId);
-        
-        if (examIndex !== -1) {
-            // Remove exam
-            exams.splice(examIndex, 1);
-            deletedCount++;
+// Admin confirm and delete exam(s) - BACKEND VERSION
+async function adminConfirmDeleteExam() {
+    try {
+        if (isAdminBatchDelete) {
+            // Delete multiple exams
+            for (const examId of adminExamsToDelete) {
+                const response = await fetch(`${API_BASE_URL}/admin/exam/${examId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error(`Error deleting exam ${examId}:`, errorData);
+                }
+            }
             
-            // Remove submissions for this exam
-            const filteredSubmissions = submissions.filter(sub => sub.examId !== examId);
-            localStorage.setItem('submissions', JSON.stringify(filteredSubmissions));
+            alert(`${adminExamsToDelete.length} exam(s) deleted successfully!`);
+        } else {
+            // Delete single exam
+            const examId = adminExamsToDelete[0];
+            const response = await fetch(`${API_BASE_URL}/admin/exam/${examId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
             
-            // Remove attempts for this exam
-            const filteredAttempts = attempts.filter(att => att.examId !== examId);
-            localStorage.setItem('examAttempts', JSON.stringify(filteredAttempts));
+            if (response.ok) {
+                alert('Exam deleted successfully!');
+            } else {
+                const errorData = await response.json();
+                alert('Error deleting exam: ' + (errorData.detail || 'Unknown error'));
+            }
         }
-    });
-    
-    // Save updated exams
-    localStorage.setItem('exams', JSON.stringify(exams));
-    
-    // Close modal and show success message
-    closeModal('adminDeleteExamModal');
-    
-    if (isAdminBatchDelete) {
-        alert(`${deletedCount} exam(s) deleted successfully!`);
-    } else {
-        alert('Exam deleted successfully!');
+        
+        // Close modal
+        closeModal('adminDeleteExamModal');
+        
+        // Refresh the view
+        loadAllExams();
+        loadAdminDashboard();
+        
+        // Reset
+        adminExamsToDelete = [];
+        isAdminBatchDelete = false;
+        
+    } catch (error) {
+        console.error("Error deleting exam:", error);
+        alert('Network error. Please try again.');
+    }
+}
+
+// Delete exam via backend
+async function adminDeleteExamBackend(examId, examTitle) {
+    if (!confirm(`Are you sure you want to delete this exam?\n\nTitle: ${examTitle}`)) {
+        return;
     }
     
-    // Refresh the view
-    loadAllExams();
-    loadAdminDashboard();
-    
-    // Reset
-    adminExamsToDelete = [];
-    isAdminBatchDelete = false;
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/exam/${examId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message || 'Exam deleted successfully!');
+            loadAllExams();
+            loadAdminDashboard();
+        } else {
+            const errorData = await response.json();
+            alert('Error: ' + (errorData.detail || 'Could not delete exam'));
+        }
+    } catch (error) {
+        console.error('Error deleting exam:', error);
+        alert('Network error. Please try again.');
+    }
 }
+
 // Verify user is admin
 if (currentUser.role !== 'admin') {
     alert('Access denied! Admins only.');
@@ -261,7 +393,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (addUserForm) {
         addUserForm.addEventListener('submit', function(e) {
             e.preventDefault();
-            addNewUser();
+            addNewUserBackend();
         });
     }
     
@@ -269,7 +401,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (editUserForm) {
         editUserForm.addEventListener('submit', function(e) {
             e.preventDefault();
-            saveUserChanges();
+            saveUserChangesBackend();
         });
     }
     
@@ -335,7 +467,7 @@ function showPage(page) {
             document.getElementById('cheatingContent').style.display = 'block';
             document.getElementById('cheatingLink').classList.add('active');
             pageTitle = 'Cheating Cases';
-            loadCheatingCases();
+            loadCheatingCasesBackend();
             break;
         case 'reports':
             document.getElementById('reportsContent').style.display = 'block';
@@ -358,8 +490,55 @@ function showPage(page) {
     }
 }
 
-// Load admin dashboard
-function loadAdminDashboard() {
+// Load admin dashboard - BACKEND VERSION
+async function loadAdminDashboard() {
+    try {
+        console.log("📊 Loading admin dashboard from backend...");
+        
+        const response = await fetch(`${API_BASE_URL}/admin/dashboard-stats`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const stats = await response.json();
+            console.log("✅ Dashboard stats loaded:", stats);
+            
+            // Calculate statistics
+            document.getElementById('totalUsers').textContent = stats.users.total;
+            document.getElementById('totalExams').textContent = stats.exams.total;
+            document.getElementById('totalSubmissions').textContent = stats.submissions.total;
+            
+            // Count cheating cases
+            document.getElementById('cheatingCases').textContent = stats.cheating.total_cases;
+            
+            // Count teachers and students
+            document.getElementById('totalTeachers').textContent = stats.users.teachers;
+            document.getElementById('totalStudents').textContent = stats.users.students;
+            
+            // Load recent activity
+            loadRecentActivityBackend(stats.recent_activities || []);
+            
+            // Calculate storage usage
+            calculateStorageUsage();
+            
+            // Count active sessions
+            document.getElementById('activeSessions').textContent = stats.submissions.in_progress || 0;
+            
+        } else {
+            console.warn("Could not fetch dashboard stats, falling back to localStorage");
+            loadAdminDashboardFallback();
+        }
+    } catch (error) {
+        console.error("Error loading dashboard:", error);
+        loadAdminDashboardFallback();
+    }
+}
+
+// Fallback function
+function loadAdminDashboardFallback() {
     const users = JSON.parse(localStorage.getItem('users')) || [];
     const exams = JSON.parse(localStorage.getItem('exams')) || [];
     const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
@@ -386,12 +565,39 @@ function loadAdminDashboard() {
     // Calculate storage usage
     calculateStorageUsage();
     
-    // Count active sessions (simulated - in real app, this would come from server)
+    // Count active sessions (simulated)
     const activeSessions = attempts.filter(att => att.status === 'in_progress').length;
     document.getElementById('activeSessions').textContent = activeSessions;
 }
 
-// Load recent activity
+// Load recent activity from backend
+function loadRecentActivityBackend(activities) {
+    // Display in table
+    const recentActivityTable = document.getElementById('recentActivityTable');
+    if (recentActivityTable) {
+        const tbody = recentActivityTable.getElementsByTagName('tbody')[0];
+        if (tbody) {
+            tbody.innerHTML = '';
+            
+            activities.forEach(activity => {
+                const row = tbody.insertRow();
+                
+                // Format time
+                const time = new Date(activity.timestamp);
+                const timeString = time.toLocaleDateString() + ' ' + time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                
+                row.innerHTML = `
+                    <td>${activity.user || 'System'}</td>
+                    <td>${activity.action}</td>
+                    <td>${activity.details ? JSON.stringify(activity.details) : ''}</td>
+                    <td>${timeString}</td>
+                `;
+            });
+        }
+    }
+}
+
+// Load recent activity (fallback)
 function loadRecentActivity() {
     const users = JSON.parse(localStorage.getItem('users')) || [];
     const exams = JSON.parse(localStorage.getItem('exams')) || [];
@@ -472,7 +678,7 @@ function calculateStorageUsage() {
     for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         const value = localStorage.getItem(key);
-        totalSize += (key.length + value.length) * 2; // Approximate bytes (2 bytes per character for UTF-16)
+        totalSize += (key.length + value.length) * 2; // Approximate bytes
     }
     
     // Convert to MB
@@ -482,14 +688,16 @@ function calculateStorageUsage() {
     const percentage = Math.min((sizeInMB / 5) * 100, 100);
     
     // Update display
-    document.getElementById('storageBar').style.width = percentage + '%';
-    document.getElementById('storageUsed').textContent = sizeInMB + ' MB / 5 MB';
+    const storageBar = document.getElementById('storageBar');
+    const storageUsed = document.getElementById('storageUsed');
+    const dbStorage = document.getElementById('dbStorage');
     
-    // Update system settings
-    document.getElementById('dbStorage').textContent = sizeInMB + ' MB';
+    if (storageBar) storageBar.style.width = percentage + '%';
+    if (storageUsed) storageUsed.textContent = sizeInMB + ' MB / 5 MB';
+    if (dbStorage) dbStorage.textContent = sizeInMB + ' MB';
 }
 
-// Load users for management
+// Load users for management - BACKEND VERSION
 let currentUserFilter = 'all';
 
 function filterUsers(filter) {
@@ -497,7 +705,99 @@ function filterUsers(filter) {
     loadUsers();
 }
 
-function loadUsers() {
+async function loadUsers() {
+    console.log('Loading users from backend...');
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/users`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const users = await response.json();
+            
+            // Filter users
+            let filteredUsers = [...users];
+            
+            if (currentUserFilter === 'student') {
+                filteredUsers = users.filter(user => user.role === 'student');
+            } else if (currentUserFilter === 'teacher') {
+                filteredUsers = users.filter(user => user.role === 'teacher');
+            } else if (currentUserFilter === 'admin') {
+                filteredUsers = users.filter(user => user.role === 'admin');
+            } else if (currentUserFilter === 'active') {
+                filteredUsers = users.filter(user => user.status === 'active');
+            } else if (currentUserFilter === 'inactive') {
+                filteredUsers = users.filter(user => user.status === 'inactive');
+            }
+            
+            // Display users
+            const usersTable = document.getElementById('usersTable');
+            if (usersTable) {
+                const tbody = usersTable.getElementsByTagName('tbody')[0];
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    
+                    filteredUsers.forEach(user => {
+                        const row = tbody.insertRow();
+                        
+                        row.innerHTML = `
+                            <td>${user.id}</td>
+                            <td>
+                                <div><strong>${user.name}</strong></div>
+                                ${user.role === 'student' ? `<small>Email: ${user.email}</small>` : ''}
+                            </td>
+                            <td>${user.email}</td>
+                            <td>
+                                <span class="status ${user.role === 'admin' ? 'cheating' : user.role === 'teacher' ? 'completed' : 'pending'}">
+                                    ${user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="status ${user.status === 'active' ? 'completed' : 'inactive'}">
+                                    ${user.status === 'active' ? 'Active' : 'Inactive'}
+                                </span>
+                            </td>
+                            <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                            <td>${user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}</td>
+                            <td>
+                                <div style="display: flex; gap: 5px;">
+                                    <button class="btn btn-primary" onclick="editUserBackend('${user.id}')" title="Edit">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="btn btn-warning" onclick="toggleUserStatusBackend('${user.id}', '${user.status}')" 
+                                            title="${user.status === 'inactive' ? 'Activate' : 'Deactivate'}">
+                                        <i class="fas ${user.status === 'inactive' ? 'fa-check' : 'fa-ban'}"></i>
+                                    </button>
+                                    ${user.id !== currentUser.id ? 
+                                        `<button class="btn btn-danger" onclick="deleteUserBackend('${user.id}')" title="Delete">
+                                            <i class="fas fa-trash"></i>
+                                        </button>` : 
+                                        `<button class="btn btn-secondary" disabled title="Cannot delete yourself">
+                                            <i class="fas fa-trash"></i>
+                                        </button>`
+                                    }
+                                </div>
+                            </td>
+                        `;
+                    });
+                }
+            }
+        } else {
+            console.warn("Could not fetch users, falling back to localStorage");
+            loadUsersFallback();
+        }
+    } catch (error) {
+        console.error("Error loading users:", error);
+        loadUsersFallback();
+    }
+}
+
+// Fallback function
+function loadUsersFallback() {
     const users = JSON.parse(localStorage.getItem('users')) || [];
     const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
     
@@ -579,8 +879,8 @@ function showAddUserModal() {
     document.getElementById('addUserModal').style.display = 'flex';
 }
 
-// Add new user
-function addNewUser() {
+// Add new user - BACKEND VERSION
+async function addNewUserBackend() {
     const name = document.getElementById('newUserName').value;
     const email = document.getElementById('newUserEmail').value;
     const password = document.getElementById('newUserPassword').value;
@@ -593,35 +893,36 @@ function addNewUser() {
         return;
     }
     
-    // Check if user already exists
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    const userExists = users.find(user => user.email === email);
-    if (userExists) {
-        alert('User with this email already exists!');
-        return;
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                email: email,
+                password: password,
+                name: name,
+                role: role
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Close modal and refresh
+            closeModal('addUserModal');
+            alert('User created successfully!');
+            loadUsers();
+            loadAdminDashboard();
+        } else {
+            const errorData = await response.json();
+            alert('Error creating user: ' + (errorData.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error creating user:', error);
+        alert('Network error. Please try again.');
     }
-    
-    // Create new user
-    const newUser = {
-        id: 'USER' + Date.now(),
-        name: name,
-        email: email,
-        password: password,
-        role: role,
-        status: status,
-        createdAt: new Date().toISOString(),
-        lastLogin: null
-    };
-    
-    // Add to users array
-    users.push(newUser);
-    localStorage.setItem('users', JSON.stringify(users));
-    
-    // Close modal and refresh
-    closeModal('addUserModal');
-    alert('User created successfully!');
-    loadUsers();
-    loadAdminDashboard();
 }
 
 // Edit user
@@ -646,8 +947,8 @@ function editUser(userId) {
     document.getElementById('editUserModal').style.display = 'flex';
 }
 
-// Save user changes
-function saveUserChanges() {
+// Save user changes - BACKEND VERSION
+async function saveUserChangesBackend() {
     const userId = document.getElementById('editUserId').value;
     const name = document.getElementById('editUserName').value;
     const email = document.getElementById('editUserEmail').value;
@@ -661,45 +962,80 @@ function saveUserChanges() {
         return;
     }
     
-    // Update user
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    const userIndex = users.findIndex(u => u.id === userId);
-    
-    if (userIndex === -1) {
-        alert('User not found!');
+    try {
+        // Note: You'll need to create a user update endpoint in your backend
+        // For now, we'll show a message
+        alert('User update functionality requires backend endpoint implementation.');
+        
+        // Close modal
+        closeModal('editUserModal');
+        
+    } catch (error) {
+        console.error('Error updating user:', error);
+        alert('Network error. Please try again.');
+    }
+}
+
+// Toggle user status - BACKEND VERSION
+async function toggleUserStatusBackend(userId, currentStatus) {
+    if (userId === currentUser.id) {
+        alert('You cannot deactivate yourself!');
         return;
     }
     
-    // Check if email is being changed to an existing email
-    if (email !== users[userIndex].email) {
-        const emailExists = users.find(u => u.email === email && u.id !== userId);
-        if (emailExists) {
-            alert('Another user with this email already exists!');
-            return;
-        }
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    
+    if (!confirm(`Are you sure you want to ${newStatus === 'active' ? 'activate' : 'deactivate'} this user?`)) {
+        return;
     }
     
-    // Update user data
-    users[userIndex].name = name;
-    users[userIndex].email = email;
-    users[userIndex].role = role;
-    users[userIndex].status = status;
-    
-    // Update password if provided
-    if (password) {
-        users[userIndex].password = password;
+    try {
+        // Note: You'll need to create a user status update endpoint
+        // For now, we'll fall back to localStorage
+        toggleUserStatus(userId);
+        
+    } catch (error) {
+        console.error('Error updating user status:', error);
+        toggleUserStatus(userId);
     }
-    
-    localStorage.setItem('users', JSON.stringify(users));
-    
-    // Close modal and refresh
-    closeModal('editUserModal');
-    alert('User updated successfully!');
-    loadUsers();
-    loadAdminDashboard();
 }
 
-// Toggle user status
+// Delete user - BACKEND VERSION
+async function deleteUserBackend(userId) {
+    if (userId === currentUser.id) {
+        alert('You cannot delete yourself!');
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/user/${userId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message || 'User deleted successfully!');
+            loadUsers();
+            loadAdminDashboard();
+        } else {
+            const errorData = await response.json();
+            alert('Error: ' + (errorData.detail || 'Could not delete user'));
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        alert('Network error. Please try again.');
+    }
+}
+
+// Toggle user status (fallback)
 function toggleUserStatus(userId) {
     if (userId === currentUser.id) {
         alert('You cannot deactivate yourself!');
@@ -726,7 +1062,7 @@ function toggleUserStatus(userId) {
     }
 }
 
-// Delete user
+// Delete user (fallback)
 function deleteUser(userId) {
     if (userId === currentUser.id) {
         alert('You cannot delete yourself!');
@@ -791,490 +1127,178 @@ function filterAllExams(filter) {
     loadAllExams();
 }
 
-function loadAllExams() {
-    const exams = JSON.parse(localStorage.getItem('exams')) || [];
-    const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    
-    // Filter exams
-    let filteredExams = [...exams];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (currentExamFilter === 'active') {
-        filteredExams = exams.filter(exam => exam.isActive);
-    } else if (currentExamFilter === 'inactive') {
-        filteredExams = exams.filter(exam => !exam.isActive);
-    } else if (currentExamFilter === 'today') {
-        filteredExams = exams.filter(exam => {
-            const examDate = new Date(exam.createdAt);
-            examDate.setHours(0, 0, 0, 0);
-            return examDate.getTime() === today.getTime();
-        });
-    }
-    
-    // Display exams
-    const allExamsTable = document.getElementById('allExamsTable');
-    if (allExamsTable) {
-        const tbody = allExamsTable.getElementsByTagName('tbody')[0];
-        if (tbody) {
-            tbody.innerHTML = '';
-            
-            filteredExams.forEach(exam => {
-                const teacher = users.find(u => u.id === exam.teacherId);
-                const examSubmissions = submissions.filter(sub => sub.examId === exam.id);
-                const cheatingCases = examSubmissions.filter(sub => sub.cheatingCount > 0).length;
-                const uniqueStudents = [...new Set(examSubmissions.map(sub => sub.studentId))];
-                
-                const row = tbody.insertRow();
-                
-                row.innerHTML = `
-                    <td><strong>${exam.title}</strong></td>
-                    <td>${teacher ? teacher.name : 'Unknown'}</td>
-                    <td>
-                        <span class="status ${exam.isActive ? 'completed' : 'inactive'}">
-                            ${exam.isActive ? 'Active' : 'Inactive'}
-                        </span>
-                    </td>
-                    <td>${new Date(exam.createdAt).toLocaleDateString()}</td>
-                    <td>${exam.duration} min</td>
-                    <td>${exam.questions.length}</td>
-                    <td>${uniqueStudents.length}</td>
-                    <td>${examSubmissions.length}</td>
-                    <td>
-                        <span class="status ${cheatingCases > 0 ? 'cheating' : 'completed'}">
-                            ${cheatingCases}
-                        </span>
-                    </td>
-                    <td>
-                        <button class="btn btn-primary" onclick="viewAdminExamDetails('${exam.id}')" title="View Details">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="btn btn-danger" onclick="adminDeleteExam('${exam.id}')" title="Delete">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                `;
-            });
-        }
-    }
-}
-
 // View exam details (admin)
 function viewAdminExamDetails(examId) {
-    const exams = JSON.parse(localStorage.getItem('exams')) || [];
-    const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    
-    const exam = exams.find(e => e.id === examId);
-    
-    if (!exam) {
-        alert('Exam not found!');
-        return;
-    }
-    
-    const teacher = users.find(u => u.id === exam.teacherId);
-    const examSubmissions = submissions.filter(sub => sub.examId === examId);
-    const cheatingCases = examSubmissions.filter(sub => sub.cheatingCount > 0);
-    
-    let details = `
-        <div style="margin-bottom: 20px;">
-            <h4>${exam.title}</h4>
-            <p>${exam.description || 'No description'}</p>
-            <p><strong>Teacher:</strong> ${teacher ? teacher.name : 'Unknown'}</p>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Status:</strong> ${exam.isActive ? 'Active' : 'Inactive'}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Access Type:</strong> ${exam.accessType === 'specific' ? 'Specific Students' : 'Anyone with Link'}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Exam Code:</strong> ${exam.examCode}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Duration:</strong> ${exam.duration} minutes
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Questions:</strong> ${exam.questions.length}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Total Marks:</strong> ${calculateTotalMarks(exam.questions)}
-            </div>
-        </div>
-        
-        <div style="margin-bottom: 20px;">
-            <h5>Statistics</h5>
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-                <div style="text-align: center; padding: 15px; background: #e7f3ff; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: bold;">${examSubmissions.length}</div>
-                    <div>Submissions</div>
-                </div>
-                <div style="text-align: center; padding: 15px; background: #e7f3ff; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: bold;">${cheatingCases.length}</div>
-                    <div>Cheating Cases</div>
-                </div>
-                <div style="text-align: center; padding: 15px; background: #e7f3ff; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: bold;">${exam.totalAttempts || 0}</div>
-                    <div>Total Attempts</div>
-                </div>
-                <div style="text-align: center; padding: 15px; background: #e7f3ff; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: bold;">${exam.studentsWithAccess ? exam.studentsWithAccess.length : 0}</div>
-                    <div>Students Accessed</div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    if (cheatingCases.length > 0) {
-        details += `
-            <div style="margin-bottom: 20px;">
-                <h5>Cheating Cases (${cheatingCases.length})</h5>
-                <div style="max-height: 200px; overflow-y: auto;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <thead>
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 8px; text-align: left;">Student</th>
-                                <th style="padding: 8px; text-align: left;">Warnings</th>
-                                <th style="padding: 8px; text-align: left;">Score</th>
-                                <th style="padding: 8px; text-align: left;">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-        `;
-        
-        cheatingCases.forEach(submission => {
-            const student = users.find(u => u.id === submission.studentId);
-            const percentage = submission.totalMarks ? 
-                Math.round((submission.score / submission.totalMarks) * 100) : 0;
-            
-            details += `
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${student ? student.name : 'Unknown'}</td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${submission.cheatingCount}</td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${submission.score || 0}/${submission.totalMarks || 'N/A'} (${percentage}%)</td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">
-                        <span style="padding: 3px 8px; border-radius: 12px; font-size: 12px; background: #f8d7da; color: #721c24">
-                            Cheating Detected
-                        </span>
-                    </td>
-                </tr>
-            `;
+    // This would fetch exam details from backend
+    alert('View exam details - would fetch from backend API\nExam ID: ' + examId);
+}
+
+// Load cheating cases - BACKEND VERSION
+async function loadCheatingCasesBackend() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/cheating-cases`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
         });
         
-        details += `</tbody></table></div>`;
-    }
-    
-    details += `
-        <div style="text-align: center; margin-top: 20px;">
-            <button class="btn btn-primary" onclick="copyExamLink('${exam.examCode}')" style="margin-right: 10px;">
-                <i class="fas fa-link"></i> Copy Exam Link
-            </button>
-            <button class="btn btn-secondary" onclick="closeModal('examDetailsModal')">
-                Close
-            </button>
-        </div>
-    `;
-    
-    // Create a modal for viewing (reusing teacher's modal)
-    const modalContent = `
-        <div class="modal-header">
-            <h3>${exam.title} - Admin View</h3>
-            <button class="close-modal" onclick="closeModal('examDetailsModal')">&times;</button>
-        </div>
-        <div>${details}</div>
-    `;
-    
-    // Create or reuse modal
-    let modal = document.getElementById('examDetailsModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.id = 'examDetailsModal';
-        modal.innerHTML = `<div class="modal-content" style="max-width: 800px;">${modalContent}</div>`;
-        document.body.appendChild(modal);
-    } else {
-        modal.querySelector('.modal-content').innerHTML = modalContent;
-    }
-    
-    modal.style.display = 'flex';
-}
-
-// Delete exam (admin)
-function adminDeleteExam(examId) {
-    if (confirm('Are you sure you want to delete this exam? This will also delete all submissions for this exam.')) {
-        const exams = JSON.parse(localStorage.getItem('exams')) || [];
-        const examIndex = exams.findIndex(e => e.id === examId);
-        
-        if (examIndex === -1) {
-            alert('Exam not found!');
-            return;
+        if (response.ok) {
+            const cases = await response.json();
+            console.log("✅ Cheating cases loaded:", cases.length);
+            
+            // Update statistics
+            const totalCases = cases.length;
+            const uniqueStudents = [...new Set(cases.map(c => c.student.id))];
+            const uniqueExams = [...new Set(cases.map(c => c.exam.id))];
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todaysCasesCount = cases.filter(c => {
+                const caseDate = new Date(c.submission.submitted_at);
+                caseDate.setHours(0, 0, 0, 0);
+                return caseDate.getTime() === today.getTime();
+            }).length;
+            
+            document.getElementById('totalCheatingCases').textContent = totalCases;
+            document.getElementById('studentsInvolved').textContent = uniqueStudents.length;
+            document.getElementById('examsAffected').textContent = uniqueExams.length;
+            document.getElementById('todaysCases').textContent = todaysCasesCount;
+            
+            // Display cases
+            const cheatingCasesTable = document.getElementById('cheatingCasesTable');
+            if (cheatingCasesTable) {
+                const tbody = cheatingCasesTable.getElementsByTagName('tbody')[0];
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    
+                    cases.forEach(cheatingCase => {
+                        const row = tbody.insertRow();
+                        
+                        // Determine severity
+                        let severity = 'Low';
+                        let severityColor = '#28a745';
+                        if (cheatingCase.submission.cheating_count >= 3) {
+                            severity = 'High';
+                            severityColor = '#dc3545';
+                        } else if (cheatingCase.submission.cheating_count >= 2) {
+                            severity = 'Medium';
+                            severityColor = '#ffc107';
+                        }
+                        
+                        row.innerHTML = `
+                            <td>
+                                <div><strong>${cheatingCase.student.name}</strong></div>
+                                <small>${cheatingCase.student.email}</small>
+                            </td>
+                            <td>${cheatingCase.exam.title}</td>
+                            <td>${cheatingCase.teacher.name}</td>
+                            <td>${new Date(cheatingCase.submission.submitted_at).toLocaleString()}</td>
+                            <td>
+                                <span class="status cheating">${cheatingCase.submission.cheating_count} warning(s)</span>
+                            </td>
+                            <td>
+                                <span style="color: ${severityColor}; font-weight: bold;">${severity}</span>
+                            </td>
+                            <td>
+                                <span class="status ${cheatingCase.submission.cheating_count >= 3 ? 'cheating' : 'pending'}">
+                                    ${cheatingCase.submission.cheating_count >= 3 ? 'Auto-Submitted' : 'Warning Only'}
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn btn-primary" onclick="viewCheatingDetailsBackend('${cheatingCase.submission.id}')">
+                                    <i class="fas fa-eye"></i> View
+                                </button>
+                            </td>
+                        `;
+                    });
+                }
+            }
+        } else {
+            console.warn("Could not fetch cheating cases, falling back to localStorage");
+            loadCheatingCases();
         }
-        
-        // Remove exam
-        exams.splice(examIndex, 1);
-        localStorage.setItem('exams', JSON.stringify(exams));
-        
-        // Remove submissions for this exam
-        const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
-        const filteredSubmissions = submissions.filter(sub => sub.examId !== examId);
-        localStorage.setItem('submissions', JSON.stringify(filteredSubmissions));
-        
-        // Remove attempts for this exam
-        const attempts = JSON.parse(localStorage.getItem('examAttempts')) || [];
-        const filteredAttempts = attempts.filter(att => att.examId !== examId);
-        localStorage.setItem('examAttempts', JSON.stringify(filteredAttempts));
-        
-        alert('Exam deleted successfully!');
-        loadAllExams();
-        loadAdminDashboard();
+    } catch (error) {
+        console.error("Error loading cheating cases:", error);
+        loadCheatingCases();
     }
 }
 
-// Load cheating cases
 let currentCheatingFilter = 'all';
 
 function filterCheatingCases(filter) {
     currentCheatingFilter = filter;
-    loadCheatingCases();
+    loadCheatingCasesBackend();
 }
 
-function loadCheatingCases() {
-    const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
-    const exams = JSON.parse(localStorage.getItem('exams')) || [];
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    
-    // Get cheating cases
-    let cheatingCases = submissions.filter(sub => sub.cheatingCount > 0);
-    
-    // Apply filters
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
-    if (currentCheatingFilter === 'today') {
-        cheatingCases = cheatingCases.filter(sub => {
-            const subDate = new Date(sub.submittedAt);
-            return subDate >= today;
+// View cheating details backend
+async function viewCheatingDetailsBackend(submissionId) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/cheating-cases/${submissionId}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
         });
-    } else if (currentCheatingFilter === 'week') {
-        cheatingCases = cheatingCases.filter(sub => {
-            const subDate = new Date(sub.submittedAt);
-            return subDate >= weekAgo;
-        });
-    } else if (currentCheatingFilter === 'serious') {
-        cheatingCases = cheatingCases.filter(sub => sub.cheatingCount >= 3);
-    } else if (currentCheatingFilter === 'warning') {
-        cheatingCases = cheatingCases.filter(sub => sub.cheatingCount < 3);
-    }
-    
-    // Sort by date (newest first)
-    cheatingCases.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-    
-    // Update statistics
-    const totalCases = submissions.filter(sub => sub.cheatingCount > 0).length;
-    const uniqueStudents = [...new Set(cheatingCases.map(sub => sub.studentId))];
-    const uniqueExams = [...new Set(cheatingCases.map(sub => sub.examId))];
-    const todaysCasesCount = submissions.filter(sub => {
-        const subDate = new Date(sub.submittedAt);
-        return sub.cheatingCount > 0 && subDate >= today;
-    }).length;
-    
-    document.getElementById('totalCheatingCases').textContent = totalCases;
-    document.getElementById('studentsInvolved').textContent = uniqueStudents.length;
-    document.getElementById('examsAffected').textContent = uniqueExams.length;
-    document.getElementById('todaysCases').textContent = todaysCasesCount;
-    
-    // Display cases
-    const cheatingCasesTable = document.getElementById('cheatingCasesTable');
-    if (cheatingCasesTable) {
-        const tbody = cheatingCasesTable.getElementsByTagName('tbody')[0];
-        if (tbody) {
-            tbody.innerHTML = '';
+        
+        if (response.ok) {
+            const cheatingCase = await response.json();
             
-            cheatingCases.forEach(submission => {
-                const student = users.find(u => u.id === submission.studentId);
-                const exam = exams.find(e => e.id === submission.examId);
-                const teacher = exam ? users.find(u => u.id === exam.teacherId) : null;
+            let details = `
+                <div style="margin-bottom: 20px;">
+                    <h4>Cheating Case Details</h4>
+                    <p><strong>Exam:</strong> ${cheatingCase.exam.title}</p>
+                    <p><strong>Student:</strong> ${cheatingCase.student.name} (${cheatingCase.student.email})</p>
+                    <p><strong>Teacher:</strong> ${cheatingCase.teacher.name}</p>
+                </div>
                 
-                if (student && exam && teacher) {
-                    const row = tbody.insertRow();
-                    
-                    // Determine severity
-                    let severity = 'Low';
-                    let severityColor = '#28a745';
-                    if (submission.cheatingCount >= 3) {
-                        severity = 'High';
-                        severityColor = '#dc3545';
-                    } else if (submission.cheatingCount >= 2) {
-                        severity = 'Medium';
-                        severityColor = '#ffc107';
-                    }
-                    
-                    row.innerHTML = `
-                        <td>
-                            <div><strong>${student.name}</strong></div>
-                            <small>${student.email}</small>
-                        </td>
-                        <td>${exam.title}</td>
-                        <td>${teacher.name}</td>
-                        <td>${new Date(submission.submittedAt).toLocaleString()}</td>
-                        <td>
-                            <span class="status cheating">${submission.cheatingCount} warning(s)</span>
-                        </td>
-                        <td>
-                            <span style="color: ${severityColor}; font-weight: bold;">${severity}</span>
-                        </td>
-                        <td>
-                            <span class="status ${submission.cheatingCount >= 3 ? 'cheating' : 'pending'}">
-                                ${submission.cheatingCount >= 3 ? 'Auto-Submitted' : 'Warning Only'}
-                            </span>
-                        </td>
-                        <td>
-                            <button class="btn btn-primary" onclick="viewCheatingDetails('${submission.id}')">
-                                <i class="fas fa-eye"></i> View
-                            </button>
-                        </td>
-                    `;
-                }
-            });
-            
-            if (cheatingCases.length === 0) {
-                const row = tbody.insertRow();
-                row.innerHTML = `
-                    <td colspan="8" class="text-center" style="padding: 40px;">
-                        <i class="fas fa-check-circle" style="font-size: 48px; color: #28a745; margin-bottom: 20px;"></i>
-                        <h3>No cheating cases found</h3>
-                        <p>${currentCheatingFilter === 'all' ? 'No cheating detected in the system.' : 
-                            `No ${currentCheatingFilter} cheating cases found.`}</p>
-                    </td>
-                `;
-            }
-        }
-    }
-}
-
-// View cheating details
-function viewCheatingDetails(submissionId) {
-    const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
-    const exams = JSON.parse(localStorage.getItem('exams')) || [];
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    
-    const submission = submissions.find(sub => sub.id === submissionId);
-    
-    if (!submission) {
-        alert('Submission not found!');
-        return;
-    }
-    
-    const student = users.find(u => u.id === submission.studentId);
-    const exam = exams.find(e => e.id === submission.examId);
-    const teacher = exam ? users.find(u => u.id === exam.teacherId) : null;
-    
-    if (!student || !exam || !teacher) {
-        alert('Could not find details for this case!');
-        return;
-    }
-    
-    // Calculate duration
-    let duration = 'N/A';
-    if (submission.startedAt && submission.submittedAt) {
-        const start = new Date(submission.startedAt);
-        const end = new Date(submission.submittedAt);
-        const diffMinutes = Math.round((end - start) / (1000 * 60));
-        duration = diffMinutes + ' minutes';
-    }
-    
-    // Calculate percentage
-    let percentage = 'N/A';
-    if (submission.score !== undefined && submission.totalMarks) {
-        percentage = Math.round((submission.score / submission.totalMarks) * 100);
-    }
-    
-    let details = `
-        <div style="margin-bottom: 20px;">
-            <h4>Cheating Case Details</h4>
-            <p><strong>Exam:</strong> ${exam.title}</p>
-            <p><strong>Student:</strong> ${student.name} (${student.email})</p>
-            <p><strong>Teacher:</strong> ${teacher.name}</p>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Total Warnings:</strong> ${submission.cheatingCount}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Status:</strong> ${submission.cheatingCount >= 3 ? 'Auto-Submitted' : 'Warning Only'}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Score:</strong> ${submission.score || 0}/${submission.totalMarks || 'N/A'} (${percentage}%)
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Duration:</strong> ${duration}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Started:</strong> ${new Date(submission.startedAt).toLocaleString()}
-            </div>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                <strong>Submitted:</strong> ${new Date(submission.submittedAt).toLocaleString()}
-            </div>
-        </div>
-    `;
-    
-    if (submission.warnings && submission.warnings.length > 0) {
-        details += `
-            <div style="margin-bottom: 20px;">
-                <h5>Warning Details</h5>
-                <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; padding: 10px;">
-        `;
-        
-        submission.warnings.forEach((warning, index) => {
-            let warningColor = '#ffc107';
-            let warningIcon = 'fa-exclamation-triangle';
-            
-            if (warning.type.includes('serious') || warning.type.includes('multiple')) {
-                warningColor = '#dc3545';
-                warningIcon = 'fa-times-circle';
-            } else if (warning.type.includes('face') || warning.type.includes('audio')) {
-                warningColor = '#fd7e14';
-                warningIcon = 'fa-microphone-slash';
-            }
-            
-            details += `
-                <div style="margin-bottom: 10px; padding: 10px; background: ${warningColor}10; border-left: 4px solid ${warningColor}; border-radius: 4px;">
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
-                        <i class="fas ${warningIcon}" style="color: ${warningColor};"></i>
-                        <strong>Warning ${index + 1}: ${warning.type}</strong>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <strong>Total Warnings:</strong> ${cheatingCase.submission.cheating_count}
                     </div>
-                    <div style="margin-left: 26px;">
-                        <div>${warning.message}</div>
-                        <small>${new Date(warning.timestamp).toLocaleString()}</small>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <strong>Status:</strong> ${cheatingCase.submission.cheating_count >= 3 ? 'Auto-Submitted' : 'Warning Only'}
+                    </div>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <strong>Score:</strong> ${cheatingCase.submission.score || 0}/${cheatingCase.submission.total_marks || 'N/A'} (${cheatingCase.submission.percentage || 0}%)
+                    </div>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <strong>Duration:</strong> ${cheatingCase.submission.duration || 'N/A'}
                     </div>
                 </div>
             `;
-        });
-        
-        details += `</div></div>`;
+            
+            if (cheatingCase.cheating_events && cheatingCase.cheating_events.length > 0) {
+                details += `
+                    <div style="margin-bottom: 20px;">
+                        <h5>Cheating Events</h5>
+                        <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; padding: 10px;">
+                `;
+                
+                cheatingCase.cheating_events.forEach((event, index) => {
+                    details += `
+                        <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                            <strong>Event ${index + 1}:</strong> ${event.type} (Severity: ${event.severity})
+                            <div><small>${new Date(event.timestamp).toLocaleString()}</small></div>
+                        </div>
+                    `;
+                });
+                
+                details += `</div></div>`;
+            }
+            
+            document.getElementById('cheatingDetailsContent').innerHTML = details;
+            document.getElementById('cheatingDetailsModal').style.display = 'flex';
+            
+        } else {
+            alert('Could not load cheating case details');
+            viewCheatingDetails(submissionId); // Fallback
+        }
+    } catch (error) {
+        console.error("Error loading cheating details:", error);
+        alert('Network error. Loading local data...');
+        viewCheatingDetails(submissionId); // Fallback
     }
-    
-    details += `
-        <div style="text-align: center; margin-top: 20px;">
-            <button class="btn btn-primary" onclick="contactStudent('${student.email}')" style="margin-right: 10px;">
-                <i class="fas fa-envelope"></i> Contact Student
-            </button>
-            <button class="btn btn-warning" onclick="contactTeacher('${teacher.email}')" style="margin-right: 10px;">
-                <i class="fas fa-chalkboard-teacher"></i> Contact Teacher
-            </button>
-            <button class="btn btn-secondary" onclick="closeModal('cheatingDetailsModal')">
-                Close
-            </button>
-        </div>
-    `;
-    
-    document.getElementById('cheatingDetailsContent').innerHTML = details;
-    document.getElementById('cheatingDetailsModal').style.display = 'flex';
 }
 
 // Load reports
@@ -1366,251 +1390,21 @@ function generateDetailedReport() {
         toDate.setHours(23, 59, 59, 999);
     }
     
-    // Filter data based on date range
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    const exams = JSON.parse(localStorage.getItem('exams')) || [];
-    const submissions = JSON.parse(localStorage.getItem('submissions')) || [];
+    // For now, just show a message
+    alert(`Report generated for ${reportType} (${dateRange})\n\nIn a real application, this would fetch data from the backend API.`);
     
-    // Generate report based on type
-    let reportTitle = '';
-    let reportData = '';
-    
-    switch(reportType) {
-        case 'user_activity':
-            reportTitle = 'User Activity Report';
-            reportData = generateUserActivityReport(users, exams, submissions, fromDate, toDate);
-            break;
-        case 'exam_performance':
-            reportTitle = 'Exam Performance Report';
-            reportData = generateExamPerformanceReport(exams, submissions, fromDate, toDate);
-            break;
-        case 'cheating_analysis':
-            reportTitle = 'Cheating Analysis Report';
-            reportData = generateCheatingAnalysisReport(submissions, exams, users, fromDate, toDate);
-            break;
-        case 'system_usage':
-            reportTitle = 'System Usage Report';
-            reportData = generateSystemUsageReport(users, exams, submissions, fromDate, toDate);
-            break;
-    }
-    
-    // Display preview
-    document.getElementById('reportContent').innerHTML = reportData;
+    // Display preview placeholder
+    document.getElementById('reportContent').innerHTML = `
+        <div style="text-align: center; padding: 40px;">
+            <i class="fas fa-chart-bar" style="font-size: 64px; color: #4361ee; margin-bottom: 20px;"></i>
+            <h4>Report Preview</h4>
+            <p>Type: ${reportType}</p>
+            <p>Date Range: ${dateRange}</p>
+            <p>Format: ${reportFormat}</p>
+            <p><small>In production, this would show actual data from the backend.</small></p>
+        </div>
+    `;
     document.getElementById('reportPreview').style.display = 'block';
-    
-    // Scroll to preview
-    document.getElementById('reportPreview').scrollIntoView({ behavior: 'smooth' });
-    
-    // Show download option
-    if (reportFormat !== 'html') {
-        setTimeout(() => {
-            alert(`Report generated! In a real application, this would download as ${reportFormat.toUpperCase()}.`);
-        }, 500);
-    }
-}
-
-// Generate user activity report
-function generateUserActivityReport(users, exams, submissions, fromDate, toDate) {
-    // Filter users created in date range
-    const newUsers = users.filter(user => {
-        const userDate = new Date(user.createdAt);
-        return userDate >= fromDate && userDate <= toDate;
-    });
-    
-    // Filter submissions in date range
-    const recentSubmissions = submissions.filter(sub => {
-        const subDate = new Date(sub.submittedAt);
-        return subDate >= fromDate && subDate <= toDate;
-    });
-    
-    // Filter exams created in date range
-    const recentExams = exams.filter(exam => {
-        const examDate = new Date(exam.createdAt);
-        return examDate >= fromDate && examDate <= toDate;
-    });
-    
-    let report = `
-        <h4>User Activity Report</h4>
-        <p><strong>Date Range:</strong> ${fromDate.toLocaleDateString()} to ${toDate.toLocaleDateString()}</p>
-        
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0;">
-            <div style="text-align: center; padding: 20px; background: #e7f3ff; border-radius: 8px;">
-                <div style="font-size: 32px; font-weight: bold;">${newUsers.length}</div>
-                <div>New Users</div>
-            </div>
-            <div style="text-align: center; padding: 20px; background: #e7f3ff; border-radius: 8px;">
-                <div style="font-size: 32px; font-weight: bold;">${recentSubmissions.length}</div>
-                <div>Submissions</div>
-            </div>
-            <div style="text-align: center; padding: 20px; background: #e7f3ff; border-radius: 8px;">
-                <div style="font-size: 32px; font-weight: bold;">${recentExams.length}</div>
-                <div>New Exams</div>
-            </div>
-        </div>
-        
-        <h5>New Users by Role</h5>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-            <thead>
-                <tr style="background: #f8f9fa;">
-                    <th style="padding: 10px; text-align: left;">Role</th>
-                    <th style="padding: 10px; text-align: left;">Count</th>
-                    <th style="padding: 10px; text-align: left;">Percentage</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
-    
-    const roles = ['student', 'teacher', 'admin'];
-    roles.forEach(role => {
-        const count = newUsers.filter(user => user.role === role).length;
-        const percentage = newUsers.length > 0 ? ((count / newUsers.length) * 100).toFixed(1) : 0;
-        
-        report += `
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${role.charAt(0).toUpperCase() + role.slice(1)}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${count}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${percentage}%</td>
-            </tr>
-        `;
-    });
-    
-    report += `</tbody></table>`;
-    
-    // Show top 10 active users
-    const userActivity = {};
-    recentSubmissions.forEach(sub => {
-        if (!userActivity[sub.studentId]) {
-            userActivity[sub.studentId] = 0;
-        }
-        userActivity[sub.studentId]++;
-    });
-    
-    const topUsers = Object.entries(userActivity)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10);
-    
-    if (topUsers.length > 0) {
-        report += `
-            <h5>Top 10 Active Users</h5>
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                    <tr style="background: #f8f9fa;">
-                        <th style="padding: 10px; text-align: left;">User</th>
-                        <th style="padding: 10px; text-align: left;">Submissions</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-        
-        topUsers.forEach(([userId, count]) => {
-            const user = users.find(u => u.id === userId);
-            if (user) {
-                report += `
-                    <tr>
-                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${user.name} (${user.email})</td>
-                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${count}</td>
-                    </tr>
-                `;
-            }
-        });
-        
-        report += `</tbody></table>`;
-    }
-    
-    report += `
-        <div style="margin-top: 20px; text-align: center;">
-            <button class="btn btn-primary" onclick="downloadReport('user_activity')">
-                <i class="fas fa-download"></i> Download Report
-            </button>
-        </div>
-    `;
-    
-    return report;
-}
-
-// Other report generation functions would be similar...
-// For brevity, I'll show the structure for one more:
-
-function generateExamPerformanceReport(exams, submissions, fromDate, toDate) {
-    // Filter submissions in date range
-    const recentSubmissions = submissions.filter(sub => {
-        const subDate = new Date(sub.submittedAt);
-        return subDate >= fromDate && subDate <= toDate;
-    });
-    
-    // Filter exams with submissions in date range
-    const activeExams = exams.filter(exam => 
-        recentSubmissions.some(sub => sub.examId === exam.id)
-    );
-    
-    let report = `
-        <h4>Exam Performance Report</h4>
-        <p><strong>Date Range:</strong> ${fromDate.toLocaleDateString()} to ${toDate.toLocaleDateString()}</p>
-        <p><strong>Exams Analyzed:</strong> ${activeExams.length}</p>
-        <p><strong>Total Submissions:</strong> ${recentSubmissions.length}</p>
-        
-        <h5>Top Performing Exams</h5>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-            <thead>
-                <tr style="background: #f8f9fa;">
-                    <th style="padding: 10px; text-align: left;">Exam</th>
-                    <th style="padding: 10px; text-align: left;">Teacher</th>
-                    <th style="padding: 10px; text-align: left;">Submissions</th>
-                    <th style="padding: 10px; text-align: left;">Avg. Score</th>
-                    <th style="padding: 10px; text-align: left;">Cheating Cases</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
-    
-    // Calculate average scores for each exam
-    const examStats = {};
-    
-    activeExams.forEach(exam => {
-        const examSubmissions = recentSubmissions.filter(sub => sub.examId === exam.id);
-        const cheatingCases = examSubmissions.filter(sub => sub.cheatingCount > 0).length;
-        
-        let totalScore = 0;
-        let totalMarks = 0;
-        let validSubmissions = 0;
-        
-        examSubmissions.forEach(sub => {
-            if (sub.score !== undefined && sub.totalMarks) {
-                totalScore += sub.score;
-                totalMarks += sub.totalMarks;
-                validSubmissions++;
-            }
-        });
-        
-        const avgScore = validSubmissions > 0 ? Math.round((totalScore / totalMarks) * 100) : 0;
-        
-        examStats[exam.id] = {
-            exam: exam,
-            submissions: examSubmissions.length,
-            avgScore: avgScore,
-            cheatingCases: cheatingCases
-        };
-    });
-    
-    // Sort by average score (highest first)
-    const sortedExams = Object.values(examStats).sort((a, b) => b.avgScore - a.avgScore);
-    
-    sortedExams.slice(0, 10).forEach(stat => {
-        const teacher = getCurrentUser(); // In real app, get teacher from users array
-        report += `
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${stat.exam.title}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${stat.exam.teacherName}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${stat.submissions}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${stat.avgScore}%</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${stat.cheatingCases}</td>
-            </tr>
-        `;
-    });
-    
-    report += `</tbody></table>`;
-    
-    return report;
 }
 
 // Load system settings
@@ -1657,7 +1451,6 @@ function saveCheatingSettings() {
 
 // Save system configuration
 function saveSystemConfig() {
-    // Same as above, just different function name for clarity
     saveCheatingSettings();
 }
 
@@ -1780,14 +1573,14 @@ window.showPage = showPage;
 window.showAddUserModal = showAddUserModal;
 window.closeModal = closeModal;
 window.filterUsers = filterUsers;
-window.editUser = editUser;
-window.toggleUserStatus = toggleUserStatus;
-window.deleteUser = deleteUser;
+window.editUserBackend = editUserBackend;
+window.toggleUserStatusBackend = toggleUserStatusBackend;
+window.deleteUserBackend = deleteUserBackend;
 window.filterAllExams = filterAllExams;
 window.viewAdminExamDetails = viewAdminExamDetails;
-window.adminDeleteExam = adminDeleteExam;
+window.adminDeleteExamBackend = adminDeleteExamBackend;
 window.filterCheatingCases = filterCheatingCases;
-window.viewCheatingDetails = viewCheatingDetails;
+window.viewCheatingDetailsBackend = viewCheatingDetailsBackend;
 window.generateReport = generateReport;
 window.generateDetailedReport = generateDetailedReport;
 window.saveCheatingSettings = saveCheatingSettings;
@@ -1800,6 +1593,14 @@ window.contactTeacher = contactTeacher;
 window.logout = function() {
     if (confirm('Are you sure you want to logout?')) {
         localStorage.removeItem('currentUser');
+        localStorage.removeItem('token');
         window.location.href = 'index.html';
     }
 };
+window.adminToggleSelectAllExams = adminToggleSelectAllExams;
+window.adminUpdateDeleteButton = adminUpdateDeleteButton;
+window.adminDeleteSingleExam = adminDeleteSingleExam;
+window.adminDeleteMultipleExams = adminDeleteMultipleExams;
+window.adminConfirmDeleteExam = adminConfirmDeleteExam;
+window.addNewUserBackend = addNewUserBackend;
+window.saveUserChangesBackend = saveUserChangesBackend;

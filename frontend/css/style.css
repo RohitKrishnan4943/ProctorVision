@@ -841,3 +841,27 @@ tbody tr:hover {
         padding: 30px 20px;
     }
 }
+/* Admin Password Field Styling */
+.password-hint {
+    display: block;
+    margin-top: 5px;
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+#adminPasswordGroup {
+    transition: all 0.3s ease;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .auth-box {
+        padding: 20px;
+    }
+    
+    .input-group input,
+    .input-group select {
+        padding: 10px;
+    }
+}

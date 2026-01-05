@@ -1,4 +1,7 @@
 // Exam state variables
+// exam.js - Add at the top
+const API_BASE_URL = window.API_BASE_URL || "http://localhost:8000/api";
+const token = localStorage.getItem('token');
 let examData = null;
 let currentUser = null;
 let currentAttempt = null;

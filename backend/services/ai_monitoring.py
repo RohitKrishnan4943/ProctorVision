@@ -1,222 +1,212 @@
-import cv2
-import numpy as np
+"""
+SIMULATED AI Monitoring System
+No OpenCV, No MediaPipe, No YOLO - Just simulation for demo
+"""
+
 import base64
+import random
 import json
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-import asyncio
-from collections import deque
+from PIL import Image
+import io
+import numpy as np
 
-class AIMonitoringService:
+class AIMonitoringSystem:
     def __init__(self):
-        # Initialize face detection (using OpenCV Haar Cascades as fallback)
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
+        print("🚀 Starting SIMULATED AI Monitoring System")
+        print("✅ Running in DEMO MODE - Simulating cheating detection")
         
-        # In production, you would load YOLOv8 model here
-        # self.yolo_model = YOLO('yolov8n.pt')
+        # Track violations per student
+        self.violation_history = {}
         
-        # Tracking variables
-        self.face_history = {}
-        self.gaze_history = {}
-        self.audio_history = {}
+        # Simulation settings
+        self.violation_chances = {
+            "face_not_visible": 0.15,      # 15% chance
+            "multiple_faces": 0.08,        # 8% chance
+            "looking_away": 0.20,          # 20% chance
+            "prohibited_object": 0.05,     # 5% chance
+            "talking_detected": 0.10,      # 10% chance
+            "tab_switch": 1.0              # 100% if tab switched
+        }
         
-        # Thresholds
-        self.FACE_CONFIDENCE_THRESHOLD = 0.5
-        self.MAX_FACES = 1
-        self.GAZE_AWAY_THRESHOLD = 2.0  # seconds
-        self.AUDIO_THRESHOLD = 0.1
-        
-    def process_frame(self, frame_data: str, student_id: str) -> Dict:
+        print("✅ AI Monitoring ready (Simulation Mode)")
+    
+    def _get_student_seed(self, student_id):
+        """Create consistent random seed based on student ID"""
+        return hash(student_id) % 1000
+    
+    def process_frame(self, frame_base64: str, student_id: str):
         """
-        Process a single frame for cheating detection
-        Returns: Dict with detected violations
+        Simulate frame processing - NO OPENCV REQUIRED
         """
         try:
-            # Decode base64 frame
-            frame_bytes = base64.b64decode(frame_data)
-            nparr = np.frombuffer(frame_bytes, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if frame is None:
-                return {"error": "Could not decode frame"}
-            
             violations = []
             
-            # 1. Face detection using Haar Cascade
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(
-                gray, 
-                scaleFactor=1.1, 
-                minNeighbors=5, 
-                minSize=(30, 30)
-            )
+            # Set seed for consistent randomness per student
+            seed = self._get_student_seed(student_id) + int(datetime.now().timestamp() / 30)
+            random.seed(seed)
             
-            # Initialize face history for student
-            if student_id not in self.face_history:
-                self.face_history[student_id] = deque(maxlen=30)
+            # Try to decode base64 for realism (but not required)
+            try:
+                # Just decode to verify it's valid base64
+                image_data = base64.b64decode(frame_base64)
+                # You could use PIL here if needed, but not required
+                # image = Image.open(io.BytesIO(image_data))
+                frame_valid = True
+            except:
+                frame_valid = False
             
-            # Record face detection
-            face_detected = len(faces) > 0
-            self.face_history[student_id].append({
-                "timestamp": datetime.now().isoformat(),
-                "face_detected": face_detected,
-                "face_count": len(faces)
-            })
-            
-            # Check for violations
-            if not face_detected:
+            # SIMULATE FACE DETECTION
+            if random.random() < self.violation_chances["face_not_visible"]:
                 violations.append({
                     "type": "face_not_visible",
-                    "severity": "high",
-                    "confidence": 0.9,
-                    "message": "Face not detected. Please ensure your face is visible.",
-                    "timestamp": datetime.now().isoformat()
+                    "severity": "medium",
+                    "confidence": round(random.uniform(0.6, 0.9), 2),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "No face detected. Please keep your face visible."
                 })
             
-            if len(faces) > self.MAX_FACES:
+            # SIMULATE MULTIPLE FACES
+            elif random.random() < self.violation_chances["multiple_faces"]:
                 violations.append({
                     "type": "multiple_faces",
                     "severity": "high",
-                    "confidence": 0.8,
-                    "message": f"Multiple faces detected ({len(faces)}).",
-                    "timestamp": datetime.now().isoformat()
-                })
-            
-            # 2. Gaze estimation (simplified)
-            if face_detected and len(faces) == 1:
-                (x, y, w, h) = faces[0]
-                face_center = (x + w//2, y + h//2)
-                frame_center = (frame.shape[1]//2, frame.shape[0]//2)
-                
-                # Calculate distance from center
-                distance = np.sqrt((face_center[0] - frame_center[0])**2 + 
-                                  (face_center[1] - frame_center[1])**2)
-                
-                # Initialize gaze history
-                if student_id not in self.gaze_history:
-                    self.gaze_history[student_id] = deque(maxlen=30)
-                
-                self.gaze_history[student_id].append({
+                    "confidence": round(random.uniform(0.7, 0.95), 2),
                     "timestamp": datetime.now().isoformat(),
-                    "distance": distance,
-                    "looking_away": distance > 100  # threshold
+                    "message": f"Multiple faces detected ({random.randint(2, 4)} faces)."
                 })
-                
-                # Check if looking away for too long
-                recent_gaze = list(self.gaze_history[student_id])
-                looking_away_count = sum(1 for g in recent_gaze[-10:] if g["looking_away"])
-                
-                if looking_away_count >= 8:  # 80% of recent frames
-                    violations.append({
-                        "type": "looking_away",
-                        "severity": "medium",
-                        "confidence": 0.7,
-                        "message": "Looking away from screen detected.",
-                        "timestamp": datetime.now().isoformat()
-                    })
             
-            # 3. Object detection (simplified - check for phone-like shapes)
-            # In production, use YOLOv8 for this
-            contours, _ = cv2.findContours(
-                cv2.Canny(frame, 100, 200),
-                cv2.RETR_TREE,
-                cv2.CHAIN_APPROX_SIMPLE
-            )
+            # SIMULATE LOOKING AWAY
+            elif random.random() < self.violation_chances["looking_away"]:
+                directions = ["left", "right", "down", "up"]
+                violations.append({
+                    "type": "looking_away",
+                    "severity": "low",
+                    "confidence": round(random.uniform(0.5, 0.8), 2),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": f"Looking {random.choice(directions)}. Please focus on screen."
+                })
             
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                if 500 < area < 5000:  # Phone-like size range
-                    x, y, w, h = cv2.boundingRect(contour)
-                    aspect_ratio = w / h
-                    
-                    if 0.5 < aspect_ratio < 2.0:  # Phone-like aspect ratio
-                        violations.append({
-                            "type": "suspicious_object",
-                            "severity": "medium",
-                            "confidence": 0.6,
-                            "message": "Suspicious object detected.",
-                            "timestamp": datetime.now().isoformat()
-                        })
-                        break
+            # SIMULATE PROHIBITED OBJECTS
+            elif random.random() < self.violation_chances["prohibited_object"]:
+                objects = ["mobile phone", "book", "notes", "earphones", "second device"]
+                violations.append({
+                    "type": "prohibited_object",
+                    "severity": "high",
+                    "confidence": round(random.uniform(0.65, 0.9), 2),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": f"Prohibited item detected: {random.choice(objects)}"
+                })
+            
+            # Track for this student
+            if student_id not in self.violation_history:
+                self.violation_history[student_id] = []
+            
+            self.violation_history[student_id].extend(violations)
             
             return {
+                "status": "success",
+                "timestamp": datetime.now().isoformat(),
                 "violations": violations,
-                "face_detected": face_detected,
-                "face_count": len(faces),
-                "timestamp": datetime.now().isoformat()
+                "face_count": 0 if violations and violations[0]["type"] == "face_not_visible" else 1,
+                "frame_valid": frame_valid,
+                "total_violations": len(self.violation_history.get(student_id, [])),
+                "message": "Frame processed in simulation mode"
             }
             
         except Exception as e:
-            return {"error": str(e)}
+            return {
+                "status": "error",
+                "timestamp": datetime.now().isoformat(),
+                "violations": [],
+                "error": str(e),
+                "message": "Using fallback simulation"
+            }
     
-    def process_audio(self, audio_data: str, student_id: str) -> Dict:
+    def process_audio(self, audio_base64: str, student_id: str):
         """
-        Process audio chunk for cheating detection
-        Returns: Dict with audio violations
+        Simulate audio processing
         """
         try:
-            # Decode base64 audio
-            audio_bytes = base64.b64decode(audio_data)
-            # In production, you would analyze audio here
-            # For simulation, we'll do random detection
-            
-            import random
             violations = []
             
-            # Initialize audio history
-            if student_id not in self.audio_history:
-                self.audio_history[student_id] = deque(maxlen=50)
+            # Set seed
+            seed = self._get_student_seed(student_id) + int(datetime.now().timestamp() / 20)
+            random.seed(seed)
             
-            # Simulate voice detection
-            has_voice = random.random() < 0.1  # 10% chance of detecting voice
+            # SIMULATE TALKING DETECTION
+            if random.random() < self.violation_chances["talking_detected"]:
+                violations.append({
+                    "type": "talking_detected",
+                    "severity": "medium",
+                    "confidence": round(random.uniform(0.4, 0.8), 2),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Talking or audio detected. Please maintain silence."
+                })
             
-            self.audio_history[student_id].append({
-                "timestamp": datetime.now().isoformat(),
-                "has_voice": has_voice,
-                "volume": random.random()
-            })
-            
-            # Check for continuous talking
-            if has_voice:
-                recent_audio = list(self.audio_history[student_id])
-                voice_count = sum(1 for a in recent_audio[-20:] if a["has_voice"])
-                
-                if voice_count >= 15:  # 75% of recent chunks
-                    violations.append({
-                        "type": "talking_detected",
-                        "severity": "high",
-                        "confidence": 0.8,
-                        "message": "Talking detected during exam.",
-                        "timestamp": datetime.now().isoformat()
-                    })
+            # SIMULATE BACKGROUND NOISE
+            elif random.random() < 0.05:  # 5% chance
+                violations.append({
+                    "type": "background_noise",
+                    "severity": "low",
+                    "confidence": round(random.uniform(0.3, 0.6), 2),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Unusual background noise detected."
+                })
             
             return {
+                "status": "success",
+                "timestamp": datetime.now().isoformat(),
                 "violations": violations,
-                "has_voice": has_voice,
-                "timestamp": datetime.now().isoformat()
+                "audio_level": round(random.uniform(0.1, 0.9), 2),
+                "message": "Audio processed in simulation mode"
             }
             
         except Exception as e:
-            return {"error": str(e)}
-    
-    def check_tab_switch(self, student_id: str, is_focused: bool) -> Dict:
-        """
-        Check for tab switching/focus loss
-        """
-        if not is_focused:
             return {
-                "violations": [{
-                    "type": "tab_switch",
-                    "severity": "medium",
-                    "confidence": 1.0,
-                    "message": "Tab switching detected.",
-                    "timestamp": datetime.now().isoformat()
-                }],
-                "timestamp": datetime.now().isoformat()
+                "status": "error",
+                "timestamp": datetime.now().isoformat(),
+                "violations": [],
+                "error": str(e)
             }
-        return {"violations": []}
+    
+    def check_tab_switch(self, student_id: str, is_focused: bool):
+        """
+        Check tab switching (real detection, not simulated)
+        """
+        violations = []
+        
+        if not is_focused:
+            violations.append({
+                "type": "tab_switch",
+                "severity": "medium",
+                "confidence": 1.0,
+                "timestamp": datetime.now().isoformat(),
+                "message": "Tab switching detected. Please stay on exam page."
+            })
+        
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "violations": violations
+        }
+    
+    def get_student_report(self, student_id: str):
+        """Get violation report for student"""
+        violations = self.violation_history.get(student_id, [])
+        
+        # Count by type
+        counts = {}
+        for v in violations:
+            counts[v["type"]] = counts.get(v["type"], 0) + 1
+        
+        return {
+            "student_id": student_id,
+            "total_violations": len(violations),
+            "violations_by_type": counts,
+            "latest_violations": violations[-10:] if len(violations) > 10 else violations,
+            "auto_submit_warning": len(violations) >= 3  # Warn if close to auto-submit
+        }
 
-# Global instance
-ai_monitor = AIMonitoringService()
+# Create global instance
+ai_monitor = AIMonitoringSystem()
