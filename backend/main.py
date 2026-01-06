@@ -10,6 +10,7 @@ from api.routes.exams import router as exams_router
 from api.routes.monitoring import router as monitoring_router
 from api.routes.admin import router as admin_router
 from api.routes.websocket import manager
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Load environment variables
 load_dotenv()
@@ -72,6 +73,23 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
+# ===================== CSP (FIX FOR CODESPACES) =====================
+class CSPMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' https: data: blob:; "
+            "img-src 'self' https: data: blob:; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; "
+            "style-src 'self' 'unsafe-inline' https:; "
+            "connect-src 'self' https: ws: wss:; "
+            "media-src 'self' https: blob:;"
+        )
+
+        return response
+
+app.add_middleware(CSPMiddleware)
 
 
 
