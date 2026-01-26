@@ -9,16 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ===================== SECURITY CONFIG =====================
+# ===================== SECURITY =====================
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# 🔥 USE ARGON2 (NO PASSWORD LENGTH LIMIT)
-pwd_context = CryptContext(
-    schemes=["argon2"],
-    deprecated="auto",
-)
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 # ===================== PASSWORD =====================
 def get_password_hash(password: str) -> str:
@@ -30,10 +26,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # ===================== TOKEN =====================
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = (
-        datetime.utcnow() + expires_delta
-        if expires_delta
-        else datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.utcnow() + (
+        expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -42,10 +36,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 def authenticate_user(db, email: str, password: str):
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        return False
+        return None
 
     if not verify_password(password, user.hashed_password):
-        return False
+        return None
 
     if user.status != "active":
         raise HTTPException(
@@ -63,12 +57,6 @@ def create_user(db, email: str, password: str, name: str, role: str):
             detail="User with this email already exists",
         )
 
-    if role not in ["student", "teacher", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role",
-        )
-
     user = User(
         email=email,
         name=name,
@@ -81,18 +69,15 @@ def create_user(db, email: str, password: str, name: str, role: str):
     db.commit()
     db.refresh(user)
 
-    access_token = create_access_token({"sub": user.email})
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
+    token = create_access_token(
+        data={
+            "sub": user.email,
+            "user_id": user.id,
             "role": user.role,
-        },
-    }
+        }
+    )
+
+    return user
 
 # ===================== CURRENT USER =====================
 def get_current_user(token: str, db):
@@ -104,13 +89,17 @@ def get_current_user(token: str, db):
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if email is None:
+        email: str = payload.get("sub")
+        role: str = payload.get("role")
+        user_id: int = payload.get("user_id")
+
+        if email is None or role is None or user_id is None:
             raise credentials_exception
+
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(User.id == user_id, User.email == email).first()
     if not user:
         raise credentials_exception
 

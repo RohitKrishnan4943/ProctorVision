@@ -3,7 +3,6 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from pydantic import BaseModel, EmailStr
-from typing import Optional
 
 from database.database import get_db
 from database.models import User
@@ -15,15 +14,7 @@ from services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 
-# ===================== ROUTER =====================
 router = APIRouter()
-
-# ===================== CORS PREFLIGHT (CRITICAL) =====================
-@router.options("/{path:path}")
-async def options_handler(path: str):
-    return Response(status_code=200)
-
-# ===================== AUTH =====================
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # ===================== SCHEMAS =====================
@@ -39,26 +30,18 @@ class UserResponse(BaseModel):
     name: str
     role: str
 
-class Token(BaseModel):
+class AuthResponse(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
 
-class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str
-    user: dict
+# ===================== REGISTER =====================
+@router.post("/register", response_model=AuthResponse)
+def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    if user_data.role not in ("student", "teacher", "admin"):
+        raise HTTPException(status_code=400, detail="Invalid role")
 
-# ===================== ROUTES =====================
-@router.post("/register", response_model=Token)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    if user_data.role not in ["student", "teacher", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role. Must be student, teacher, or admin",
-        )
-
-    return create_user_service(
+    user = create_user_service(
         db=db,
         email=user_data.email,
         password=user_data.password,
@@ -66,30 +49,17 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         role=user_data.role,
     )
 
-@router.post("/login", response_model=LoginResponse)
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
-):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user.last_login = datetime.utcnow()
-    db.commit()
-
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=access_token_expires,
+    token = create_access_token(
+        data={
+            "sub": user.email,
+            "user_id": user.id,
+            "role": user.role,
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
     return {
-        "access_token": access_token,
+        "access_token": token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
@@ -99,27 +69,43 @@ async def login(
         },
     }
 
+# ===================== LOGIN =====================
+@router.post("/login", response_model=AuthResponse)
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    user.last_login = datetime.utcnow()
+    db.commit()
+
+    token = create_access_token(
+        data={
+            "sub": user.email,
+            "user_id": user.id,
+            "role": user.role,
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+        },
+    }
+
+# ===================== ME =====================
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
+def me(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
     return get_current_user(token, db)
-
-@router.post("/logout")
-async def logout():
-    return {"message": "Successfully logged out"}
-
-@router.get("/users")
-async def get_users(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-):
-    current_user = get_current_user(token, db)
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-
-    return db.query(User).all()

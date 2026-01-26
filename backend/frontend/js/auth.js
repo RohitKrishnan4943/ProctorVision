@@ -1,4 +1,4 @@
-// auth.js — FINAL WORKING VERSION (FastAPI same-origin)
+// auth.js — FINAL STABLE VERSION (FastAPI, same-origin)
 
 // ===================== API BASE =====================
 window.API_BASE_URL = "/api";
@@ -8,7 +8,7 @@ const registerForm = document.getElementById("registerForm");
 
 if (registerForm) {
   registerForm.addEventListener("submit", async (e) => {
-    e.preventDefault(); // 🔥 CRITICAL
+    e.preventDefault(); // 🔥 IMPORTANT
 
     const name = document.getElementById("name").value.trim();
     const email = document.getElementById("email").value.trim();
@@ -22,15 +22,13 @@ if (registerForm) {
       return;
     }
 
-    if (role === "admin") {
-      if (adminPassword !== "shingekinokyojin") {
-        showMessage("Invalid admin password", "error");
-        return;
-      }
+    if (role === "admin" && adminPassword !== "shingekinokyojin") {
+      showMessage("Invalid admin password", "error");
+      return;
     }
 
     try {
-      const response = await fetch("/api/auth/register", {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password, role })
@@ -62,7 +60,7 @@ const loginForm = document.getElementById("loginForm");
 
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
-    e.preventDefault(); // 🔥 CRITICAL
+    e.preventDefault(); // 🔥 IMPORTANT
 
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
@@ -77,11 +75,9 @@ if (loginForm) {
       formData.append("username", email);
       formData.append("password", password);
 
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: formData.toString()
       });
 
@@ -104,7 +100,41 @@ if (loginForm) {
   });
 }
 
-// ===================== UTILITIES =====================
+// ===================== AUTH CHECK (USED BY DASHBOARDS) =====================
+function checkAuth(expectedRole = null) {
+  const token = localStorage.getItem("token");
+  const userRaw = localStorage.getItem("currentUser");
+
+  if (!token || !userRaw) {
+    window.location.href = "index.html";
+    return null;
+  }
+
+  let user;
+  try {
+    user = JSON.parse(userRaw);
+  } catch {
+    localStorage.clear();
+    window.location.href = "index.html";
+    return null;
+  }
+
+  if (expectedRole && user.role !== expectedRole) {
+    localStorage.clear();
+    window.location.href = "index.html";
+    return null;
+  }
+
+  return user;
+}
+
+// ===================== LOGOUT =====================
+function logout() {
+  localStorage.clear();
+  window.location.href = "index.html";
+}
+
+// ===================== UI HELPERS =====================
 function showMessage(text, type) {
   const div = document.getElementById("message");
   if (!div) return;
@@ -119,7 +149,13 @@ function showMessage(text, type) {
 }
 
 function redirectBasedOnRole(user) {
-  if (user.role === "teacher") location.href = "teacher-dashboard.html";
-  else if (user.role === "student") location.href = "student-dashboard.html";
-  else if (user.role === "admin") location.href = "admin-dashboard.html";
+  if (user.role === "admin") {
+    window.location.href = "admin-dashboard.html";
+  } else if (user.role === "teacher") {
+    window.location.href = "teacher-dashboard.html";
+  } else if (user.role === "student") {
+    window.location.href = "student-dashboard.html";
+  } else {
+    showMessage("Unknown user role", "error");
+  }
 }

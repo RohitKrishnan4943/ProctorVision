@@ -768,6 +768,14 @@ tbody tr:hover {
     font-weight: 600;
     display: inline-block;
 }
+/* dashboard page switching */
+.page-section {
+  display: none;
+}
+
+.page-section.active {
+  display: block;
+}
 
 .status.completed {
     background: #d4edda;

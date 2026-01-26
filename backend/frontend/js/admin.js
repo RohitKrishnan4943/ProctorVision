@@ -1,4 +1,57 @@
 // Check authentication
+/* ================= ADMIN NAV CONTROLLER ================= */
+document.addEventListener("DOMContentLoaded", () => {
+  const user = JSON.parse(localStorage.getItem("currentUser"));
+  const token = localStorage.getItem("token");
+
+  if (!user || !token || user.role !== "admin") {
+    window.location.href = "index.html";
+    return;
+  }
+
+  // Fill header info
+  document.getElementById("userName").textContent = user.name;
+  document.getElementById("userEmail").textContent = user.email;
+  document.getElementById("userAvatar").textContent = user.name[0].toUpperCase();
+
+  const sections = {
+    dashboardLink: "dashboardContent",
+    usersLink: "usersContent",
+    examsLink: "examsContent",
+    cheatingLink: "cheatingContent",
+    reportsLink: "reportsContent",
+    systemLink: "systemContent"
+  };
+
+  Object.keys(sections).forEach(linkId => {
+    const link = document.getElementById(linkId);
+    if (!link) return;
+
+    link.addEventListener("click", e => {
+      e.preventDefault();
+      switchSection(sections[linkId], link);
+    });
+  });
+
+  switchSection("dashboardContent", document.getElementById("dashboardLink"));
+});
+
+function switchSection(sectionId, activeLink) {
+  document.querySelectorAll(
+    "#dashboardContent, #usersContent, #examsContent, #cheatingContent, #reportsContent, #systemContent"
+  ).forEach(div => div.style.display = "none");
+
+  const section = document.getElementById(sectionId);
+  if (section) section.style.display = "block";
+
+  document.querySelectorAll(".menu-item").forEach(i => i.classList.remove("active"));
+  if (activeLink) activeLink.classList.add("active");
+
+  document.getElementById("pageTitle").textContent =
+    activeLink?.innerText.trim() || "Admin Dashboard";
+}
+/* ======================================================== */
+
 checkAuth();
 const currentUser = getCurrentUser();
 
