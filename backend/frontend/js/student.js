@@ -1,97 +1,267 @@
 // ================= STUDENT.JS — FINAL WORKING VERSION =================
+const API_BASE_URL = "/api";
 
 document.addEventListener("DOMContentLoaded", () => {
-  const currentUser = JSON.parse(localStorage.getItem("currentUser"));
+    const currentUser = JSON.parse(localStorage.getItem("currentUser"));
 
-  // ✅ No token check for student
-  if (!currentUser || currentUser.role !== "student") {
-    window.location.href = "index.html";
-    return;
-  }
+    if (!currentUser || currentUser.role !== "student") {
+        window.location.href = "index.html";
+        return;
+    }
 
-  // Header
-  document.getElementById("userName").textContent = currentUser.name;
-  document.getElementById("userEmail").textContent = currentUser.email;
-  document.getElementById("userAvatar").textContent =
-    currentUser.name.charAt(0).toUpperCase();
+    // User info
+    document.getElementById("userName").textContent = currentUser.name;
+    document.getElementById("userEmail").textContent = currentUser.email;
+    document.getElementById("userAvatar").textContent = currentUser.name.charAt(0).toUpperCase();
 
-  setupNavigation();
-  switchSection("dashboardContent", document.getElementById("dashboardLink"));
+    // Navigation
+    document.getElementById("dashboardLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        showPage("dashboardContent");
+        loadStudentDashboard();
+    });
+
+    document.getElementById("enterCodeLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        showPage("enterCodeContent");
+    });
+
+    document.getElementById("myExamsLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        showPage("myExamsContent");
+        loadMyExams();
+    });
+
+    document.getElementById("resultsLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        showPage("resultsContent");
+        loadMyResults();
+    });
+
+    // Enter exam code
+    document.getElementById("examCodeInput")?.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            validateExamCode();
+        }
+    });
+
+    document.getElementById("validateCodeBtn")?.addEventListener("click", validateExamCode);
+
+    // Initialize
+    showPage("dashboardContent");
+    loadStudentDashboard();
 });
 
-// ================= NAVIGATION =================
-function setupNavigation() {
-  const map = {
-    dashboardLink: "dashboardContent",
-    enterCodeLink: "enterCodeContent",
-    myExamsLink: "myExamsContent",
-    resultsLink: "resultsContent"
-  };
-
-  Object.keys(map).forEach(linkId => {
-    const link = document.getElementById(linkId);
-    if (!link) return;
-
-    link.addEventListener("click", e => {
-      e.preventDefault();
-      switchSection(map[linkId], link);
+// ================= PAGE NAVIGATION =================
+function showPage(pageId) {
+    const pages = ["dashboardContent", "enterCodeContent", "myExamsContent", "resultsContent"];
+    pages.forEach(id => {
+        document.getElementById(id).style.display = id === pageId ? "block" : "none";
     });
-  });
+
+    // Update active menu
+    document.querySelectorAll(".menu-item").forEach(item => {
+        item.classList.remove("active");
+    });
+    document.querySelector(`[data-page="${pageId}"]`)?.classList.add("active");
 }
 
-function switchSection(sectionId, activeLink) {
-  document.querySelectorAll(
-    "#dashboardContent,#enterCodeContent,#myExamsContent,#resultsContent"
-  ).forEach(div => (div.style.display = "none"));
+// ================= VALIDATE EXAM CODE =================
+async function validateExamCode() {
+    const codeInput = document.getElementById("examCodeInput");
+    const code = codeInput.value.trim().toUpperCase();
+    
+    if (!code) {
+        alert("Please enter an exam code");
+        return;
+    }
 
-  document.getElementById(sectionId).style.display = "block";
+    try {
+        const token = localStorage.getItem("token");
+        
+        // Validate exam code with backend
+        const response = await fetch(`${API_BASE_URL}/exams/${code}`, {
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            }
+        });
 
-  document.querySelectorAll(".menu-item")
-    .forEach(i => i.classList.remove("active"));
+        if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error("Invalid exam code. Please check and try again.");
+            } else if (response.status === 403) {
+                throw new Error("You are not authorized to access this exam.");
+            } else {
+                throw new Error("Failed to validate exam code.");
+            }
+        }
 
-  if (activeLink) activeLink.classList.add("active");
+        // Exam is valid, redirect to exam page
+        window.location.href = `exam.html?code=${code}`;
+        
+    } catch (error) {
+        console.error("Error validating exam code:", error);
+        alert(error.message || "Failed to validate exam code. Please try again.");
+        codeInput.value = "";
+        codeInput.focus();
+    }
 }
 
-// ================= EXAM CODE =================
-function validateExamCode() {
-  const input = document.getElementById("examCodeInput");
-  const code = input.value.trim().toUpperCase(); // Convert to uppercase for matching
+// ================= STUDENT DASHBOARD =================
+async function loadStudentDashboard() {
+    try {
+        const token = localStorage.getItem("token");
+        
+        // Load student's active exams
+        const response = await fetch(`${API_BASE_URL}/exams/student/active`, {
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            }
+        });
 
-  if (!code) {
-    alert("Please enter an exam code");
-    return;
-  }
+        if (response.ok) {
+            const exams = await response.json();
+            
+            // Update dashboard stats
+            document.getElementById("activeExams").textContent = exams.length;
+            
+            // Load recent exams
+            const table = document.querySelector("#activeExamsTable tbody");
+            if (table) {
+                table.innerHTML = "";
+                exams.forEach(exam => {
+                    const row = table.insertRow();
+                    row.innerHTML = `
+                        <td>${exam.title}</td>
+                        <td>${exam.duration} min</td>
+                        <td>${exam.questions?.length || 0} questions</td>
+                        <td>
+                            <button class="btn btn-start" onclick="startExam('${exam.exam_code}')">
+                                Start Exam
+                            </button>
+                        </td>
+                    `;
+                });
+            }
+        }
+    } catch (error) {
+        console.error("Error loading student dashboard:", error);
+    }
+}
 
-  const exams = JSON.parse(localStorage.getItem("exams")) || [];
-  const exam = exams.find(e => e.examCode.toUpperCase() === code); // ✅ FIX: Case-insensitive match
+function startExam(examCode) {
+    window.location.href = `exam.html?code=${examCode}`;
+}
 
-  if (!exam) {
-    alert("Invalid exam code. Please check the code and try again.");
-    return;
-  }
+// ================= MY EXAMS =================
+async function loadMyExams() {
+    try {
+        const token = localStorage.getItem("token");
+        
+        const response = await fetch(`${API_BASE_URL}/exams/student/all`, {
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            }
+        });
 
-  // ✅ Also check if exam is active
-  if (exam.isActive === false) {
-    alert("This exam is no longer active. Please contact your teacher.");
-    return;
-  }
+        if (!response.ok) {
+            document.querySelector("#myExamsTable tbody").innerHTML = 
+                "<tr><td colspan='5'>No exams available</td></tr>";
+            return;
+        }
+        
+        const exams = await response.json();
+        const table = document.querySelector("#myExamsTable tbody");
+        
+        if (table) {
+            table.innerHTML = "";
+            exams.forEach(exam => {
+                const row = table.insertRow();
+                row.innerHTML = `
+                    <td>${exam.title}</td>
+                    <td>${exam.duration} min</td>
+                    <td>${exam.questions?.length || 0}</td>
+                    <td>${exam.is_active ? 'Active' : 'Completed'}</td>
+                    <td>
+                        <button class="btn btn-view" onclick="viewExam('${exam.exam_code}')">
+                            ${exam.is_active ? 'Start' : 'View'}
+                        </button>
+                    </td>
+                `;
+            });
+        }
+    } catch (error) {
+        console.error("Error loading my exams:", error);
+    }
+}
 
-  // ✅ Redirect to exam page with code
-  window.location.href = `exam.html?code=${code}`;
+// ================= MY RESULTS =================
+async function loadMyResults() {
+    try {
+        const token = localStorage.getItem("token");
+        
+        const response = await fetch(`${API_BASE_URL}/exams/student/submissions`, {
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            document.querySelector("#resultsTable tbody").innerHTML = 
+                "<tr><td colspan='6'>No results yet</td></tr>";
+            return;
+        }
+        
+        const submissions = await response.json();
+        const table = document.querySelector("#resultsTable tbody");
+        
+        if (table) {
+            table.innerHTML = "";
+            submissions.forEach(sub => {
+                const row = table.insertRow();
+                row.innerHTML = `
+                    <td>${sub.exam_title || "Unknown"}</td>
+                    <td>${new Date(sub.submitted_at).toLocaleDateString()}</td>
+                    <td>${sub.score || 0}/${sub.total_marks || 0}</td>
+                    <td>${sub.percentage || 0}%</td>
+                    <td>${sub.cheating_warnings || 0}</td>
+                    <td>
+                        <span class="status ${sub.cheating_warnings > 0 ? 'warning' : 'completed'}">
+                            ${sub.cheating_warnings > 0 ? '⚠️ Flagged' : 'Completed'}
+                        </span>
+                    </td>
+                `;
+            });
+        }
+    } catch (error) {
+        console.error("Error loading results:", error);
+    }
+}
+
+function viewExam(examCode) {
+    if (confirm("Do you want to view this exam?")) {
+        window.location.href = `exam.html?code=${examCode}`;
+    }
 }
 
 // ================= LOGOUT =================
 function logout() {
-  localStorage.removeItem("currentUser");
-  localStorage.removeItem("token"); // if you use token
-  window.location.href = "index.html";
+    if (confirm("Are you sure you want to logout?")) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("currentUser");
+        window.location.href = "index.html";
+    }
 }
 
-// ================= MODAL FUNCTIONS =================
-function closeModal(modalId) {
-  document.getElementById(modalId).style.display = 'none';
-}
-
+// ================= GLOBAL EXPORTS =================
 window.validateExamCode = validateExamCode;
+window.startExam = startExam;
+window.viewExam = viewExam;
 window.logout = logout;
-window.closeModal = closeModal;
+window.closeModal = function(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+};
