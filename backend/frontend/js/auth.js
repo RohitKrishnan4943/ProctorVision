@@ -1,4 +1,4 @@
-// auth.js — FINAL STABLE VERSION (FastAPI, same-origin)
+// auth.js — FIXED PERSISTENT VERSION
 
 // ===================== API BASE =====================
 window.API_BASE_URL = "/api";
@@ -8,7 +8,7 @@ const registerForm = document.getElementById("registerForm");
 
 if (registerForm) {
   registerForm.addEventListener("submit", async (e) => {
-    e.preventDefault(); // 🔥 IMPORTANT
+    e.preventDefault();
 
     const name = document.getElementById("name").value.trim();
     const email = document.getElementById("email").value.trim();
@@ -60,7 +60,7 @@ const loginForm = document.getElementById("loginForm");
 
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
-    e.preventDefault(); // 🔥 IMPORTANT
+    e.preventDefault();
 
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
@@ -114,13 +114,17 @@ function checkAuth(expectedRole = null) {
   try {
     user = JSON.parse(userRaw);
   } catch {
-    localStorage.clear();
+    // ✅ FIXED: Only clear auth data, not exams
+    localStorage.removeItem("currentUser");
+    localStorage.removeItem("token");
     window.location.href = "index.html";
     return null;
   }
 
   if (expectedRole && user.role !== expectedRole) {
-    localStorage.clear();
+    // ✅ FIXED: Only clear auth data
+    localStorage.removeItem("currentUser");
+    localStorage.removeItem("token");
     window.location.href = "index.html";
     return null;
   }
@@ -130,7 +134,9 @@ function checkAuth(expectedRole = null) {
 
 // ===================== LOGOUT =====================
 function logout() {
-  localStorage.clear();
+  // ✅ CRITICAL FIX: Only remove auth data, NOT exams/submissions/users
+  localStorage.removeItem("currentUser");
+  localStorage.removeItem("token");
   window.location.href = "index.html";
 }
 

@@ -1,98 +1,71 @@
-// ========================= TEACHER.JS (FULL & FINAL) =========================
-// This file matches teacher-dashboard.html EXACTLY
-// No duplicate functions
-// No missing handlers
-// Uses localStorage only
-// ===========================================================================
-
-// ================= AUTH GUARD =================
-const currentUser = checkAuth("teacher");
-if (!currentUser) {
-  throw new Error("Unauthorized access");
-}
-
-const token = localStorage.getItem("token");
+// ================= TEACHER.JS — STABLE & SAFE VERSION =================
 
 // ================= GLOBAL STATE =================
+let currentUser = null;
 let currentExamFilter = "all";
 let examsToDelete = [];
-let isBatchDelete = false;
 let questionCounter = 0;
 
 // ================= DOM READY =================
 document.addEventListener("DOMContentLoaded", () => {
-  // User info
+  // ✅ FIX #1: Move ALL auth logic inside DOMContentLoaded
+  currentUser = JSON.parse(localStorage.getItem("currentUser"));
+
+  if (!currentUser || currentUser.role !== "teacher") {
+    window.location.replace("index.html");
+    return; // Stop execution if not authenticated
+  }
+
+  // Header
   document.getElementById("userName").textContent = currentUser.name;
   document.getElementById("userEmail").textContent = currentUser.email;
   document.getElementById("userAvatar").textContent =
     currentUser.name.charAt(0).toUpperCase();
 
-  // Sidebar navigation
-  document.getElementById("dashboardLink").onclick = () => showPage("dashboard");
-  document.getElementById("createExamLink").onclick = () => showPage("createExam");
-  document.getElementById("examsLink").onclick = () => showPage("myExams");
-  document.getElementById("resultsLink").onclick = () => showPage("results");
+  setupNavigation();
+  bindCreateExamForm();
+  bindModalEvents();
 
-  // Create exam form
-  const form = document.getElementById("createExamForm");
-  if (form) {
-    form.addEventListener("submit", e => {
-      e.preventDefault();
-      handleCreateExam();
-    });
-  }
-
-  showPage("dashboard");
+  switchSection("dashboardContent", document.getElementById("dashboardLink"));
 });
 
-// ================= PAGE NAVIGATION =================
-function showPage(page) {
-  const sections = [
-    "dashboardContent",
-    "createExamContent",
-    "myExamsContent",
-    "resultsContent"
-  ];
+// ================= NAVIGATION =================
+function setupNavigation() {
+  const map = {
+    dashboardLink: "dashboardContent",
+    createExamLink: "createExamContent",
+    examsLink: "myExamsContent",
+    resultsLink: "resultsContent"
+  };
 
-  sections.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = "none";
+  // ✅ FIX #2: Use Object.entries for clarity
+  Object.entries(map).forEach(([linkId, sectionId]) => {
+    const link = document.getElementById(linkId);
+    if (!link) return;
+
+    link.addEventListener("click", e => {
+      e.preventDefault(); // Prevent default anchor behavior
+      switchSection(sectionId, link);
+    });
   });
+}
 
-  document.querySelectorAll(".menu-item").forEach(i =>
-    i.classList.remove("active")
-  );
+function switchSection(sectionId, activeLink) {
+  document.querySelectorAll(
+    "#dashboardContent,#createExamContent,#myExamsContent,#resultsContent"
+  ).forEach(div => (div.style.display = "none"));
 
-  let title = "Teacher Dashboard";
+  const section = document.getElementById(sectionId);
+  if (section) section.style.display = "block";
 
-  if (page === "dashboard") {
-    document.getElementById("dashboardContent").style.display = "block";
-    document.getElementById("dashboardLink").classList.add("active");
-    title = "Teacher Dashboard";
-    loadDashboardStats();
-  }
+  document.querySelectorAll(".menu-item")
+    .forEach(i => i.classList.remove("active"));
 
-  if (page === "createExam") {
-    document.getElementById("createExamContent").style.display = "block";
-    document.getElementById("createExamLink").classList.add("active");
-    title = "Create Exam";
-  }
+  if (activeLink) activeLink.classList.add("active");
 
-  if (page === "myExams") {
-    document.getElementById("myExamsContent").style.display = "block";
-    document.getElementById("examsLink").classList.add("active");
-    title = "My Exams";
-    loadMyExams();
-  }
-
-  if (page === "results") {
-    document.getElementById("resultsContent").style.display = "block";
-    document.getElementById("resultsLink").classList.add("active");
-    title = "Results";
-    loadResults();
-  }
-
-  document.getElementById("pageTitle").textContent = title;
+  // Page-specific loaders
+  if (sectionId === "dashboardContent") loadDashboardStats();
+  if (sectionId === "myExamsContent") loadMyExams();
 }
 
 // ================= DASHBOARD =================
@@ -112,192 +85,271 @@ function loadDashboardStats() {
     mySubs.filter(s => s.status === "completed").length;
   document.getElementById("cheatingCases").textContent =
     mySubs.filter(s => s.cheatingCount > 0).length;
-
-  const table = document.querySelector("#examsTable tbody");
-  table.innerHTML = "";
-
-  myExams.slice(0, 5).forEach(exam => {
-    const row = table.insertRow();
-    row.innerHTML = `
-      <td>${exam.title}</td>
-      <td>${new Date(exam.createdAt).toLocaleDateString()}</td>
-      <td>${exam.studentsWithAccess?.length || 0}</td>
-      <td><span class="status completed">Active</span></td>
-      <td>
-        <button class="btn btn-primary" onclick="viewExamDetails('${exam.id}')">
-          <i class="fas fa-eye"></i>
-        </button>
-      </td>
-    `;
-  });
 }
 
 // ================= CREATE EXAM =================
+function bindCreateExamForm() {
+  // ✅ FIX #3: Proper form binding
+  const form = document.getElementById("createExamForm");
+  if (!form) return;
+
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    handleCreateExam();
+  });
+}
+
+// ================= MODAL FUNCTIONS =================
+function bindModalEvents() {
+  // Close modal when clicking outside
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal')) {
+      e.target.style.display = 'none';
+    }
+  });
+}
+
+function showExamLinkModal(examCode) {
+  // Generate the full exam link
+  const currentUrl = window.location.origin + window.location.pathname;
+  const baseUrl = currentUrl.replace('teacher-dashboard.html', '');
+  const examLink = `${baseUrl}exam.html?code=${examCode}`;
+  
+  // Set the link in the modal
+  document.getElementById('generatedLink').value = examLink;
+  
+  // Store exam code for copying
+  document.getElementById('generatedLink').dataset.examCode = examCode;
+  
+  // Show the modal
+  document.getElementById('examLinkModal').style.display = 'block';
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).style.display = 'none';
+}
+
+function copyLink() {
+  const linkInput = document.getElementById('generatedLink');
+  linkInput.select();
+  linkInput.setSelectionRange(0, 99999); // For mobile devices
+  
+  try {
+    navigator.clipboard.writeText(linkInput.value)
+      .then(() => {
+        alert('Link copied to clipboard!');
+      })
+      .catch(err => {
+        // Fallback for older browsers
+        document.execCommand('copy');
+        alert('Link copied to clipboard!');
+      });
+  } catch (err) {
+    // Fallback for older browsers
+    document.execCommand('copy');
+    alert('Link copied to clipboard!');
+  }
+}
+
+function copyExamCode() {
+  const linkInput = document.getElementById('generatedLink');
+  const examCode = linkInput.dataset.examCode;
+  
+  try {
+    navigator.clipboard.writeText(examCode)
+      .then(() => {
+        alert('Exam code copied to clipboard: ' + examCode);
+      })
+      .catch(err => {
+        // Fallback for older browsers
+        const tempInput = document.createElement('input');
+        tempInput.value = examCode;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        alert('Exam code copied to clipboard: ' + examCode);
+      });
+  } catch (err) {
+    // Fallback for older browsers
+    const tempInput = document.createElement('input');
+    tempInput.value = examCode;
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    document.execCommand('copy');
+    document.body.removeChild(tempInput);
+    alert('Exam code copied to clipboard: ' + examCode);
+  }
+}
+
+// ================= ENHANCED MCQ FUNCTIONALITY =================
 function addMCQ() {
   questionCounter++;
-  const c = document.getElementById("questionsContainer");
-  c.insertAdjacentHTML("beforeend", `
-    <div class="question-item">
-      <label>Question ${questionCounter} (MCQ)</label>
-      <input class="question-text" required>
-      <input class="option-text" placeholder="Option 1">
-      <input class="option-text" placeholder="Option 2">
-      <input class="option-text" placeholder="Option 3">
-      <input class="option-text" placeholder="Option 4">
-      <input class="question-marks" type="number" value="1">
-      <button type="button" onclick="removeQuestion(this)">Remove</button>
-    </div>
-  `);
+  const questionId = `question-${questionCounter}`;
+  
+  document.getElementById("questionsContainer").insertAdjacentHTML(
+    "beforeend",
+    `
+    <div class="question-item" id="${questionId}">
+      <div class="question-header">
+        <input class="question-text" placeholder="Enter your question" required>
+        <input class="question-marks" type="number" value="1" min="1">
+        <button type="button" onclick="removeQuestion('${questionId}')">Remove</button>
+      </div>
+      
+      <div class="options-container">
+        <div class="option-row">
+          <input type="radio" name="correct-${questionId}" value="0" required>
+          <input type="text" class="option-text" placeholder="Option A" data-index="0" required>
+        </div>
+        <div class="option-row">
+          <input type="radio" name="correct-${questionId}" value="1">
+          <input type="text" class="option-text" placeholder="Option B" data-index="1" required>
+        </div>
+        <div class="option-row">
+          <input type="radio" name="correct-${questionId}" value="2">
+          <input type="text" class="option-text" placeholder="Option C" data-index="2" required>
+        </div>
+        <div class="option-row">
+          <input type="radio" name="correct-${questionId}" value="3">
+          <input type="text" class="option-text" placeholder="Option D" data-index="3" required>
+        </div>
+      </div>
+      <small class="correct-hint">Select the correct answer by clicking the radio button</small>
+    </div>`
+  );
 }
 
-function addShortAnswer() {
-  questionCounter++;
-  const c = document.getElementById("questionsContainer");
-  c.insertAdjacentHTML("beforeend", `
-    <div class="question-item">
-      <label>Question ${questionCounter} (Short)</label>
-      <input class="question-text" required>
-      <input class="expected-answer" placeholder="Expected answer">
-      <input class="question-marks" type="number" value="5">
-      <button type="button" onclick="removeQuestion(this)">Remove</button>
-    </div>
-  `);
-}
-
-function removeQuestion(btn) {
-  btn.closest(".question-item").remove();
-}
-
-function toggleStudentSelection() {
-  const type = document.getElementById("accessType").value;
-  document.getElementById("studentSelection").style.display =
-    type === "specific" ? "block" : "none";
+// Helper function to remove questions
+function removeQuestion(questionId) {
+  document.getElementById(questionId).remove();
 }
 
 function handleCreateExam() {
+  const examTitle = document.getElementById("examTitle");
+  const examDuration = document.getElementById("examDuration");
+  
   const exams = JSON.parse(localStorage.getItem("exams")) || [];
 
+  const examCode = Math.random().toString(36).substring(2, 10).toUpperCase();
   const exam = {
     id: "EXAM" + Date.now(),
-    examCode: Math.random().toString(36).substring(2, 10).toUpperCase(),
+    examCode: examCode,
     title: examTitle.value,
-    description: examDescription.value,
     duration: examDuration.value,
     teacherId: currentUser.id,
-    teacherName: currentUser.name,
     createdAt: new Date().toISOString(),
     isActive: true,
     questions: []
   };
 
-  document.querySelectorAll(".question-item").forEach(q => {
+  // Process all MCQ questions
+  const questionItems = document.querySelectorAll(".question-item");
+  
+  // Check if there are any questions
+  if (questionItems.length === 0) {
+    alert("Please add at least one question to the exam!");
+    return;
+  }
+
+  let hasError = false;
+  
+  questionItems.forEach(q => {
+    const questionText = q.querySelector(".question-text").value;
+    const marks = parseInt(q.querySelector(".question-marks").value) || 1;
+    
+    // Get all options
+    const options = [];
+    q.querySelectorAll(".option-text").forEach(optionInput => {
+      options.push(optionInput.value.trim());
+    });
+    
+    // Get the correct answer (radio button value)
+    const correctRadio = q.querySelector(`input[name^="correct-"]:checked`);
+    const correctAnswer = correctRadio ? parseInt(correctRadio.value) : -1;
+    
+    // Validate that a correct answer is selected
+    if (correctAnswer === -1) {
+      alert("Please select a correct answer for each MCQ!");
+      hasError = true;
+      return;
+    }
+    
+    // Validate that all options are filled
+    if (options.some(opt => opt === "")) {
+      alert("Please fill all options for each MCQ!");
+      hasError = true;
+      return;
+    }
+    
     exam.questions.push({
-      text: q.querySelector(".question-text").value,
-      marks: q.querySelector(".question-marks").value
+      type: "mcq",
+      question: questionText,
+      options: options,
+      correctAnswer: correctAnswer, // 0-based index
+      marks: marks
     });
   });
+
+  if (hasError) return;
 
   exams.push(exam);
   localStorage.setItem("exams", JSON.stringify(exams));
 
-  generatedLink.value =
-    `${location.origin}/frontend/exam.html?code=${exam.examCode}`;
-
-  document.getElementById("examLinkModal").style.display = "flex";
-  showPage("myExams");
+  // Clear the form
+  document.getElementById("examTitle").value = "";
+  document.getElementById("questionsContainer").innerHTML = "";
+  questionCounter = 0;
+  
+  // Show the exam link modal instead of just an alert
+  showExamLinkModal(examCode);
 }
 
 // ================= MY EXAMS =================
-function filterExams(filter) {
-  currentExamFilter = filter;
-  loadMyExams();
-}
-
 function loadMyExams() {
   const exams = JSON.parse(localStorage.getItem("exams")) || [];
-  let myExams = exams.filter(e => e.teacherId === currentUser.id);
-
-  if (currentExamFilter === "active") {
-    myExams = myExams.filter(e => e.isActive);
-  }
-  if (currentExamFilter === "inactive") {
-    myExams = myExams.filter(e => !e.isActive);
-  }
-
   const tbody = document.querySelector("#myExamsTable tbody");
+  if (!tbody) return;
+
   tbody.innerHTML = "";
 
-  myExams.forEach(exam => {
-    const row = tbody.insertRow();
-    row.innerHTML = `
-      <td><input type="checkbox" class="exam-checkbox" value="${exam.id}"></td>
-      <td>${exam.title}</td>
-      <td>${exam.isActive ? "Active" : "Inactive"}</td>
-      <td>${new Date(exam.createdAt).toLocaleDateString()}</td>
-      <td>${exam.examCode}</td>
-      <td>${exam.questions.length}</td>
-      <td>${exam.duration}</td>
-      <td>—</td>
-      <td>—</td>
-      <td>
-        <button onclick="deleteSingleExam('${exam.id}')">Delete</button>
-      </td>
-    `;
-  });
+  exams
+    .filter(e => e.teacherId === currentUser.id)
+    .forEach(exam => {
+      const row = tbody.insertRow();
+      row.innerHTML = `
+        <td>${exam.title}</td>
+        <td>${exam.examCode}</td>
+        <td>${exam.duration} min</td>
+        <td>
+          <button onclick="deleteExam('${exam.id}')">Delete</button>
+        </td>
+      `;
+    });
 }
 
-function deleteSingleExam(id) {
-  examsToDelete = [id];
-  isBatchDelete = false;
-  document.getElementById("deleteExamModal").style.display = "flex";
-}
-
-function deleteMultipleExams() {
-  examsToDelete = Array.from(
-    document.querySelectorAll(".exam-checkbox:checked")
-  ).map(cb => cb.value);
-
-  if (!examsToDelete.length) return alert("Select exams");
-  isBatchDelete = true;
-  document.getElementById("deleteExamModal").style.display = "flex";
-}
-
-function confirmDeleteExam() {
+function deleteExam(id) {
+  if (!confirm("Delete exam?")) return;
   let exams = JSON.parse(localStorage.getItem("exams")) || [];
-  exams = exams.filter(e => !examsToDelete.includes(e.id));
+  exams = exams.filter(e => e.id !== id);
   localStorage.setItem("exams", JSON.stringify(exams));
-  closeModal("deleteExamModal");
   loadMyExams();
-}
-
-// ================= RESULTS =================
-function loadResults() {
-  document.getElementById("resultsTable").querySelector("tbody").innerHTML =
-    "<tr><td colspan='10'>No results yet</td></tr>";
-}
-
-function filterResultsByExam() {}
-
-// ================= UTIL =================
-function closeModal(id) {
-  document.getElementById(id).style.display = "none";
-}
-
-function copyLink() {
-  generatedLink.select();
-  document.execCommand("copy");
-}
-
-function copyExamCode() {
-  navigator.clipboard.writeText(generatedLink.value.split("code=")[1]);
-}
-
-function viewExamDetails() {
-  alert("Exam details view");
 }
 
 // ================= LOGOUT =================
-window.logout = function () {
-  localStorage.clear();
-  location.href = "index.html";
-};
+function logout() {
+  localStorage.removeItem("currentUser");
+  localStorage.removeItem("token"); // if you use token
+  window.location.href = "index.html";
+}
+
+
+// ================= GLOBAL EXPORTS =================
+// ✅ FIX #4: Make functions available globally for onclick attributes
+window.addMCQ = addMCQ;
+window.logout = logout;
+window.deleteExam = deleteExam;
+window.removeQuestion = removeQuestion;
+window.closeModal = closeModal;
+window.copyLink = copyLink;
+window.copyExamCode = copyExamCode;

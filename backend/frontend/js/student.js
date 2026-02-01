@@ -1,115 +1,97 @@
-// ================= STUDENT.JS — FINAL STABLE VERSION =================
+// ================= STUDENT.JS — FINAL WORKING VERSION =================
 
-// ================= AUTH + INIT =================
 document.addEventListener("DOMContentLoaded", () => {
-  const user = JSON.parse(localStorage.getItem("currentUser"));
-  const token = localStorage.getItem("token");
+  const currentUser = JSON.parse(localStorage.getItem("currentUser"));
 
-  if (!user || !token || user.role !== "student") {
+  // ✅ No token check for student
+  if (!currentUser || currentUser.role !== "student") {
     window.location.href = "index.html";
     return;
   }
 
-  // Make user globally available
-  window.currentUser = user;
-  window.token = token;
-
-  // Populate header
-  document.getElementById("userName").textContent = user.name;
-  document.getElementById("userEmail").textContent = user.email;
+  // Header
+  document.getElementById("userName").textContent = currentUser.name;
+  document.getElementById("userEmail").textContent = currentUser.email;
   document.getElementById("userAvatar").textContent =
-    user.name.charAt(0).toUpperCase();
+    currentUser.name.charAt(0).toUpperCase();
 
-  // Default page
-  showPage("dashboard");
+  setupNavigation();
+  switchSection("dashboardContent", document.getElementById("dashboardLink"));
 });
 
 // ================= NAVIGATION =================
-function showPage(page) {
-  const sections = [
-    "dashboardContent",
-    "enterCodeContent",
-    "myExamsContent",
-    "resultsContent"
-  ];
+function setupNavigation() {
+  const map = {
+    dashboardLink: "dashboardContent",
+    enterCodeLink: "enterCodeContent",
+    myExamsLink: "myExamsContent",
+    resultsLink: "resultsContent"
+  };
 
-  sections.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = "none";
+  Object.keys(map).forEach(linkId => {
+    const link = document.getElementById(linkId);
+    if (!link) return;
+
+    link.addEventListener("click", e => {
+      e.preventDefault();
+      switchSection(map[linkId], link);
+    });
   });
-
-  document.querySelectorAll(".menu-item").forEach(i =>
-    i.classList.remove("active")
-  );
-
-  let title = "Student Dashboard";
-
-  if (page === "dashboard") {
-    document.getElementById("dashboardContent").style.display = "block";
-    document.getElementById("dashboardLink")?.classList.add("active");
-    title = "Student Dashboard";
-    loadStudentDashboard();
-  }
-
-  if (page === "enterCode") {
-    document.getElementById("enterCodeContent").style.display = "block";
-    document.getElementById("enterCodeLink")?.classList.add("active");
-    title = "Enter Exam Code";
-  }
-
-  if (page === "myExams") {
-    document.getElementById("myExamsContent").style.display = "block";
-    document.getElementById("myExamsLink")?.classList.add("active");
-    title = "My Exams";
-  }
-
-  if (page === "results") {
-    document.getElementById("resultsContent").style.display = "block";
-    document.getElementById("resultsLink")?.classList.add("active");
-    title = "Results";
-  }
-
-  document.getElementById("pageTitle").textContent = title;
 }
 
-// ================= DASHBOARD =================
-function loadStudentDashboard() {
-  const exams = JSON.parse(localStorage.getItem("exams")) || [];
-  const submissions = JSON.parse(localStorage.getItem("submissions")) || [];
+function switchSection(sectionId, activeLink) {
+  document.querySelectorAll(
+    "#dashboardContent,#enterCodeContent,#myExamsContent,#resultsContent"
+  ).forEach(div => (div.style.display = "none"));
 
-  const mySubs = submissions.filter(
-    s => s.studentId === currentUser.id && s.status === "completed"
-  );
+  document.getElementById(sectionId).style.display = "block";
 
-  document.getElementById("completedExamsCount").textContent = mySubs.length;
-  document.getElementById("assignedExamsCount").textContent = exams.length;
-  document.getElementById("pendingExamsCount").textContent =
-    exams.length - mySubs.length;
+  document.querySelectorAll(".menu-item")
+    .forEach(i => i.classList.remove("active"));
+
+  if (activeLink) activeLink.classList.add("active");
 }
 
 // ================= EXAM CODE =================
 function validateExamCode() {
-  const code = document.getElementById("examCodeInput").value.trim().toUpperCase();
-  if (!code) return alert("Enter exam code");
+  const input = document.getElementById("examCodeInput");
+  const code = input.value.trim().toUpperCase(); // Convert to uppercase for matching
 
-  const exams = JSON.parse(localStorage.getItem("exams")) || [];
-  const exam = exams.find(e => e.examCode === code);
-
-  if (!exam) {
-    alert("Invalid exam code");
+  if (!code) {
+    alert("Please enter an exam code");
     return;
   }
 
-  localStorage.setItem("currentExam", exam.id);
+  const exams = JSON.parse(localStorage.getItem("exams")) || [];
+  const exam = exams.find(e => e.examCode.toUpperCase() === code); // ✅ FIX: Case-insensitive match
+
+  if (!exam) {
+    alert("Invalid exam code. Please check the code and try again.");
+    return;
+  }
+
+  // ✅ Also check if exam is active
+  if (exam.isActive === false) {
+    alert("This exam is no longer active. Please contact your teacher.");
+    return;
+  }
+
+  // ✅ Redirect to exam page with code
   window.location.href = `exam.html?code=${code}`;
 }
 
 // ================= LOGOUT =================
-window.logout = function () {
-  localStorage.clear();
+function logout() {
+  localStorage.removeItem("currentUser");
+  localStorage.removeItem("token"); // if you use token
   window.location.href = "index.html";
-};
+}
 
-// ================= GLOBAL EXPORTS =================
-window.showPage = showPage;
+// ================= MODAL FUNCTIONS =================
+function closeModal(modalId) {
+  document.getElementById(modalId).style.display = 'none';
+}
+
 window.validateExamCode = validateExamCode;
+window.logout = logout;
+window.closeModal = closeModal;
