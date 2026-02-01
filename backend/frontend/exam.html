@@ -363,6 +363,33 @@
                 transform: translateY(0);
             }
         }
+
+        /* Start Exam Button Styles */
+        .start-exam-section {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            margin: 20px 0;
+        }
+        
+        .exam-instructions {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        
+        .instructions-list {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+        
+        .instructions-list li {
+            margin-bottom: 8px;
+        }
         
         @media (max-width: 1024px) {
             .exam-wrapper {
@@ -418,7 +445,7 @@
             </h3>
             
             <div class="camera-preview">
-                <video id="videoElement" autoplay playsinline></video>
+                <video id="videoElement" autoplay playsinline muted></video>
                 <div class="camera-status">
                     <i class="fas fa-video" id="cameraIcon"></i>
                     <span id="cameraStatus">Camera Active</span>
@@ -498,31 +525,68 @@
                 </div>
             </div>
             
-            <!-- Questions Container -->
-           <div class="question-container">
-    <div id="currentQuestionNumber"></div>
-    <div id="questionText" class="question-text"></div>
-    <div id="optionsContainer" class="options-container"></div>
-            </div>
-
-            
-            <!-- Exam Controls -->
-            <div class="exam-controls">
-                <div>
-                    <button class="btn btn-secondary" id="prevBtn" disabled>
-                        <i class="fas fa-arrow-left"></i> Previous
-                    </button>
-                    <button class="btn btn-secondary" id="nextBtn">
-                        Next <i class="fas fa-arrow-right"></i>
-                    </button>
-                    <button class="btn btn-warning" id="markBtn">
-                        <i class="fas fa-flag"></i> Mark for Review
-                    </button>
+            <!-- Start Exam Section -->
+            <div id="examInstructions" class="start-exam-section">
+                <h2 style="color: #4361ee; margin-bottom: 20px;">Ready to Start Your Exam?</h2>
+                <p style="font-size: 18px; margin-bottom: 30px;">Please read the instructions carefully before starting.</p>
+                
+                <div class="exam-instructions">
+                    <h3 style="margin-top: 0; color: #4361ee;">
+                        <i class="fas fa-info-circle"></i> Important Instructions
+                    </h3>
+                    <ul class="instructions-list">
+                        <li>Ensure you have a stable internet connection</li>
+                        <li>Camera and microphone access is required</li>
+                        <li>Do not switch tabs or applications during the exam</li>
+                        <li>The exam will auto-submit when time expires</li>
+                        <li>Any suspicious activity will be flagged</li>
+                    </ul>
                 </div>
-                <div>
-                    <button class="btn btn-primary" id="submitBtn">
-                        <i class="fas fa-paper-plane"></i> Submit Exam
-                    </button>
+                
+                <div style="margin: 30px 0;">
+                    <div style="display: inline-flex; align-items: center; background: #e9ecef; padding: 15px 25px; border-radius: 10px; margin-bottom: 15px;">
+                        <i class="fas fa-clock" style="color: #4361ee; font-size: 24px; margin-right: 15px;"></i>
+                        <div>
+                            <div style="font-weight: 600; font-size: 18px;" id="examDurationDisplay">Duration: 0 minutes</div>
+                            <div style="font-size: 14px; color: #666;" id="totalQuestionsDisplay">Total Questions: 0</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <button id="startExamBtn" class="btn btn-primary" style="padding: 15px 40px; font-size: 18px;" disabled>
+                    <i class="fas fa-play-circle"></i> Start Exam
+                </button>
+                
+                <p style="margin-top: 20px; color: #666; font-size: 14px;">
+                    <i class="fas fa-exclamation-triangle"></i> Clicking "Start Exam" will begin the timer and enable AI proctoring
+                </p>
+            </div>
+            
+            <!-- Questions Container (Hidden initially) -->
+            <div id="examContainer" style="display: none;">
+                <div class="question-container">
+                    <div id="currentQuestionNumber" style="font-weight: 600; color: #4361ee; margin-bottom: 10px;"></div>
+                    <div id="questionsContainer"></div>
+                </div>
+                
+                <!-- Exam Controls -->
+                <div class="exam-controls">
+                    <div>
+                        <button class="btn btn-secondary" id="prevBtn" disabled>
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <button class="btn btn-secondary" id="nextBtn">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                        <button class="btn btn-warning" id="markBtn">
+                            <i class="fas fa-flag"></i> Mark for Review
+                        </button>
+                    </div>
+                    <div>
+                        <button class="btn btn-primary" id="submitBtn">
+                            <i class="fas fa-paper-plane"></i> Submit Exam
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -561,7 +625,7 @@
             <button class="btn btn-secondary" onclick="closeSubmitConfirm()">
                 Cancel
             </button>
-            <button class="btn btn-primary" onclick="submitExam()">
+            <button class="btn btn-primary" onclick="confirmSubmit()">
                 Yes, Submit Exam
             </button>
         </div>
@@ -574,7 +638,7 @@
     </div>
 
     <!-- Loading Screen -->
-    <div class="overlay" id="loadingOverlay">
+    <div class="overlay" id="loadingOverlay" style="display: flex;">
 
         <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white;">
             <i class="fas fa-spinner fa-spin fa-3x" style="margin-bottom: 20px;"></i>
@@ -584,8 +648,25 @@
     </div>
 
     <script src="js/config.js"></script>
-<script src="js/auth.js"></script>
-<script type="module" src="js/exam.js?v=1"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/exam.js"></script>
+    
+    <script>
+        // Helper functions
+        function closeCheatingAlert() {
+            const cheatingAlert = document.getElementById("cheatingAlert");
+            const cheatingOverlay = document.getElementById("cheatingOverlay");
+            if (cheatingAlert) cheatingAlert.classList.remove("show");
+            if (cheatingOverlay) cheatingOverlay.classList.remove("show");
+        }
+        
+        function closeSubmitConfirm() {
+            const submitConfirm = document.getElementById("submitConfirm");
+            const submitOverlay = document.getElementById("submitOverlay");
+            if (submitConfirm) submitConfirm.classList.remove("show");
+            if (submitOverlay) submitOverlay.classList.remove("show");
+        }
+    </script>
 
 </body>
 </html>
