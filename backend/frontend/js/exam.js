@@ -1,11 +1,10 @@
 console.log("🔥 AI PROCTORING SYSTEM LOADED - REVISED VERSION");
 
-// ================= CONFIGURATION =================
 const MAX_WARNINGS = 3;
 const NO_FACE_TIMEOUT = 5000;
 const LOOK_AWAY_TIMEOUT = 10000;
-const SPEAKING_TIMEOUT = 5000;
 const AUDIO_THRESHOLD = 0.18;
+const SPEAKING_TIME_THRESHOLD = 5.0;
 const OBJECT_SCORE_THRESHOLD = 0.6;
 const SUSPICIOUS_OBJECTS = ['cell phone', 'phone', 'book', 'laptop', 'remote', 'tv'];
 const OBJECT_CHECK_INTERVAL = 2000;
@@ -13,7 +12,6 @@ const OBJECT_WARNING_COOLDOWN = 10000;
 const DETECTION_INTERVAL = 150;
 const UI_UPDATE_INTERVAL = 1000;
 
-// ================= GLOBAL STATE =================
 const API_BASE_URL = "/api";
 const token = localStorage.getItem("token");
 const currentUser = JSON.parse(localStorage.getItem("currentUser"));
@@ -37,7 +35,6 @@ let faceDetection = null;
 let faceMesh = null;
 let objectDetection = null;
 
-// ================= PROCTORING STATE =================
 let warningCount = 0;
 let warningHistory = [];
 let isExamActive = false;
@@ -46,19 +43,21 @@ let faceDetected = false;
 let multipleFaces = false;
 let noFaceStartTime = null;
 let lookingAwayStartTime = null;
-let speakingStartTime = null;
+let speakingTime = 0;
 let lastObjectWarningTime = 0;
 let isLookingAtScreen = true;
 let detectedObjects = [];
 let securityBlockersActive = false;
 
-// ================= INTERVAL REFERENCES =================
 let faceInterval = null;
 let audioInterval = null;
 let objectInterval = null;
 let uiInterval = null;
 
-// ================= DOM READY =================
+let totalSpeakingTime = 0;
+let totalLookingAwayTime = 0;
+let startExamTime = null;
+
 document.addEventListener("DOMContentLoaded", async () => {
     console.log("🎓 Initializing AI Proctoring System...");
     
@@ -69,6 +68,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     try {
+        await checkAttemptStatus(examCode.toUpperCase());
         await loadAIModels();
     } catch (error) {
         console.warn("AI models failed to load:", error);
@@ -84,7 +84,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-// ================= AI MODELS LOADING =================
+async function checkAttemptStatus(examCode) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/exams/${examCode}/attempt-status`, {
+            headers: { 
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.attempted) {
+                alert("You have already attempted this exam. You cannot retake it.");
+                window.location.href = "student-dashboard.html";
+            }
+        }
+    } catch (error) {
+        console.error("Error checking attempt status:", error);
+    }
+}
+
 async function loadAIModels() {
     showLoading("Loading AI models...");
     
@@ -128,40 +148,45 @@ async function loadAIModels() {
     }
 }
 
-// ================= SECURITY & BLOCKING FUNCTIONS =================
 function setupSecurityBlockers() {
     if (securityBlockersActive) return;
     
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('copy', handleCopyPaste);
-    document.addEventListener('paste', handleCopyPaste);
-    document.addEventListener('cut', handleCopyPaste);
-    document.addEventListener('dragstart', preventDefault);
-    document.addEventListener('drop', preventDefault);
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('contextmenu', handleContextMenu, true);
+    document.addEventListener('copy', handleCopyPaste, true);
+    document.addEventListener('paste', handleCopyPaste, true);
+    document.addEventListener('cut', handleCopyPaste, true);
+    document.addEventListener('dragstart', preventDefault, true);
+    document.addEventListener('drop', preventDefault, true);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
     document.addEventListener('MSFullscreenChange', handleFullscreenChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    
     securityBlockersActive = true;
     console.log("✅ Security blockers activated");
 }
 
 function removeSecurityBlockers() {
-    document.removeEventListener('keydown', handleKeyDown);
-    document.removeEventListener('contextmenu', handleContextMenu);
-    document.removeEventListener('copy', handleCopyPaste);
-    document.removeEventListener('paste', handleCopyPaste);
-    document.removeEventListener('cut', handleCopyPaste);
-    document.removeEventListener('dragstart', preventDefault);
-    document.removeEventListener('drop', preventDefault);
+    document.removeEventListener('keydown', handleKeyDown, true);
+    document.removeEventListener('contextmenu', handleContextMenu, true);
+    document.removeEventListener('copy', handleCopyPaste, true);
+    document.removeEventListener('paste', handleCopyPaste, true);
+    document.removeEventListener('cut', handleCopyPaste, true);
+    document.removeEventListener('dragstart', preventDefault, true);
+    document.removeEventListener('drop', preventDefault, true);
     document.removeEventListener('fullscreenchange', handleFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
     document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
+    
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.removeEventListener('pagehide', handlePageHide);
     
     securityBlockersActive = false;
 }
@@ -252,6 +277,21 @@ function handleVisibilityChange() {
     }
 }
 
+function handleBeforeUnload(e) {
+    if (isExamActive) {
+        cleanupProctoring();
+        const message = "Are you sure you want to leave? Your exam will be submitted automatically with violations recorded.";
+        e.returnValue = message;
+        return message;
+    }
+}
+
+function handlePageHide() {
+    if (isExamActive) {
+        cleanupProctoring();
+    }
+}
+
 function preventDefault(e) {
     if (isExamActive) {
         e.preventDefault();
@@ -259,7 +299,6 @@ function preventDefault(e) {
     }
 }
 
-// ================= CAMERA & MICROPHONE =================
 async function requestCameraAndMic() {
     try {
         showLoading("Requesting camera and microphone access...");
@@ -317,17 +356,104 @@ function setupAudioAnalysis(stream) {
     }
 }
 
-// ================= PROCTORING CONTROL =================
 function startProctoring() {
     if (isProctoringActive || !isExamActive) return;
     
     isProctoringActive = true;
+    startExamTime = Date.now();
     console.log("🚀 Starting proctoring...");
     
-    startFaceDetection();
-    startAudioMonitoring();
-    startObjectDetection();
-    startUIUpdates();
+    if (faceDetection && !faceInterval) {
+        faceInterval = setInterval(async () => {
+            if (!faceDetection || !isExamActive) return;
+            
+            try {
+                const video = document.getElementById("videoElement");
+                if (!video) return;
+                
+                await faceDetection.send({ image: video });
+            } catch (error) {
+                console.error("Face detection error:", error);
+            }
+        }, DETECTION_INTERVAL);
+    }
+    
+    if (analyser && !audioInterval) {
+        audioInterval = setInterval(() => {
+            if (!analyser || !timeDomainArray || !isExamActive) return;
+            
+            analyser.getFloatTimeDomainData(timeDomainArray);
+            
+            let sum = 0;
+            for (let i = 0; i < timeDomainArray.length; i++) {
+                sum += timeDomainArray[i] * timeDomainArray[i];
+            }
+            
+            const rms = Math.sqrt(sum / timeDomainArray.length);
+            
+            if (rms > AUDIO_THRESHOLD) {
+                speakingTime += 0.5;
+                totalSpeakingTime += 0.5;
+            } else {
+                speakingTime = Math.max(0, speakingTime - 0.2);
+            }
+            
+            if (speakingTime >= SPEAKING_TIME_THRESHOLD) {
+                addWarning('Speaking detected continuously');
+                speakingTime = 0;
+            }
+            
+            updateAudioStatus(rms);
+        }, 500);
+    }
+    
+    if (objectDetection && !objectInterval) {
+        objectInterval = setInterval(async () => {
+            if (!objectDetection || !isExamActive) return;
+            
+            try {
+                const video = document.getElementById("videoElement");
+                if (!video) return;
+                
+                const predictions = await objectDetection.detect(video);
+                const suspicious = predictions.filter(p => 
+                    p.score >= OBJECT_SCORE_THRESHOLD && 
+                    SUSPICIOUS_OBJECTS.some(obj => 
+                        p.class.toLowerCase().includes(obj.toLowerCase())
+                    )
+                );
+                
+                if (suspicious.length > 0) {
+                    const now = Date.now();
+                    if (now - lastObjectWarningTime >= OBJECT_WARNING_COOLDOWN) {
+                        const objectNames = [...new Set(suspicious.map(p => p.class))].join(', ');
+                        addWarning(`Suspicious object detected: ${objectNames}`);
+                        lastObjectWarningTime = now;
+                    }
+                    detectedObjects = suspicious;
+                } else {
+                    detectedObjects = [];
+                }
+                
+                updateObjectDetectionStatus();
+            } catch (error) {
+                console.error("Object detection error:", error);
+            }
+        }, OBJECT_CHECK_INTERVAL);
+    }
+    
+    if (!uiInterval) {
+        uiInterval = setInterval(() => {
+            if (!isExamActive) return;
+            
+            checkFaceTimeout();
+            checkLookingAwayTimeout();
+            
+            updateFaceStatus();
+            updateHeadPoseStatus();
+            updateObjectDetectionStatus();
+        }, UI_UPDATE_INTERVAL);
+    }
 }
 
 function stopProctoring() {
@@ -356,108 +482,6 @@ function stopProctoring() {
     console.log("✅ Proctoring stopped");
 }
 
-function startFaceDetection() {
-    if (faceInterval || !faceDetection) return;
-    
-    faceInterval = setInterval(async () => {
-        if (!faceDetection || !isExamActive) return;
-        
-        try {
-            const video = document.getElementById("videoElement");
-            if (!video) return;
-            
-            await faceDetection.send({ image: video });
-        } catch (error) {
-            console.error("Face detection error:", error);
-        }
-    }, DETECTION_INTERVAL);
-}
-
-function startAudioMonitoring() {
-    if (audioInterval || !analyser) return;
-    
-    audioInterval = setInterval(() => {
-        if (!analyser || !timeDomainArray || !isExamActive) return;
-        
-        analyser.getFloatTimeDomainData(timeDomainArray);
-        
-        let sum = 0;
-        for (let i = 0; i < timeDomainArray.length; i++) {
-            sum += timeDomainArray[i] * timeDomainArray[i];
-        }
-        
-        const rms = Math.sqrt(sum / timeDomainArray.length);
-        
-        if (rms > AUDIO_THRESHOLD) {
-            if (!speakingStartTime) {
-                speakingStartTime = Date.now();
-            } else {
-                const speakingDuration = Date.now() - speakingStartTime;
-                if (speakingDuration > SPEAKING_TIMEOUT) {
-                    addWarning('Continuous speaking detected');
-                    speakingStartTime = null;
-                }
-            }
-        } else {
-            speakingStartTime = null;
-        }
-        
-        updateAudioStatus(rms);
-    }, 500);
-}
-
-function startObjectDetection() {
-    if (objectInterval || !objectDetection) return;
-    
-    objectInterval = setInterval(async () => {
-        if (!objectDetection || !isExamActive) return;
-        
-        try {
-            const video = document.getElementById("videoElement");
-            if (!video) return;
-            
-            const predictions = await objectDetection.detect(video);
-            const suspicious = predictions.filter(p => 
-                p.score >= OBJECT_SCORE_THRESHOLD && 
-                SUSPICIOUS_OBJECTS.some(obj => 
-                    p.class.toLowerCase().includes(obj.toLowerCase())
-                )
-            );
-            
-            if (suspicious.length > 0) {
-                const now = Date.now();
-                if (now - lastObjectWarningTime >= OBJECT_WARNING_COOLDOWN) {
-                    const objectNames = [...new Set(suspicious.map(p => p.class))].join(', ');
-                    addWarning(`Suspicious object detected: ${objectNames}`);
-                    lastObjectWarningTime = now;
-                }
-                detectedObjects = suspicious;
-            } else {
-                detectedObjects = [];
-            }
-            
-            updateObjectDetectionStatus();
-        } catch (error) {
-            console.error("Object detection error:", error);
-        }
-    }, OBJECT_CHECK_INTERVAL);
-}
-
-function startUIUpdates() {
-    if (uiInterval) return;
-    
-    uiInterval = setInterval(() => {
-        if (!isExamActive) return;
-        
-        checkFaceTimeout();
-        checkLookingAwayTimeout();
-        
-        updateFaceStatus();
-        updateHeadPoseStatus();
-        updateObjectDetectionStatus();
-    }, UI_UPDATE_INTERVAL);
-}
-
 function checkFaceTimeout() {
     if (!faceDetected && isExamActive) {
         if (!noFaceStartTime) {
@@ -475,16 +499,20 @@ function checkLookingAwayTimeout() {
     if (!isLookingAtScreen && isExamActive) {
         if (!lookingAwayStartTime) {
             lookingAwayStartTime = Date.now();
-        } else if (Date.now() - lookingAwayStartTime > LOOK_AWAY_TIMEOUT) {
-            addWarning('Looking away from screen for extended period');
-            lookingAwayStartTime = null;
+        } else {
+            const awayTime = Date.now() - lookingAwayStartTime;
+            totalLookingAwayTime += 0.1;
+            
+            if (awayTime > LOOK_AWAY_TIMEOUT) {
+                addWarning('Looking away from screen for extended period');
+                lookingAwayStartTime = Date.now();
+            }
         }
     } else {
         lookingAwayStartTime = null;
     }
 }
 
-// ================= FACE DETECTION HANDLERS =================
 function handleFaceDetection(results) {
     if (!results || !results.detections) {
         faceDetected = false;
@@ -524,7 +552,6 @@ function handleFaceMesh(results) {
     }
 }
 
-// ================= MONITORING UI =================
 function updateFaceStatus() {
     const faceStatus = document.getElementById("faceStatus");
     if (!faceStatus) return;
@@ -611,7 +638,6 @@ function updateAudioStatus(volume) {
     }
 }
 
-// ================= FULLSCREEN MANAGEMENT =================
 function forceFullscreen() {
     try {
         const elem = document.documentElement;
@@ -645,7 +671,6 @@ function showTabSwitchWarning() {
     }
 }
 
-// ================= WARNING SYSTEM =================
 function addWarning(reason) {
     if (!isExamActive) return;
     
@@ -736,7 +761,6 @@ function showCheatingAlert(reason) {
     }
 }
 
-// ================= EXAM FUNCTIONS =================
 async function loadExamFromBackend(examCode) {
     try {
         showLoading("Loading exam from server...");
@@ -854,7 +878,6 @@ window.startExam = async function () {
     }
 };
 
-// ================= CLEANUP FUNCTIONS =================
 function cleanupProctoring() {
     isExamActive = false;
     stopProctoring();
@@ -903,7 +926,6 @@ function cleanupProctoring() {
     console.log("✅ Proctoring system cleaned up");
 }
 
-// ================= SUBMIT FUNCTION =================
 async function submitAnswers(autoSubmitReason = null) {
     try {
         if (!currentAttempt) {
@@ -918,6 +940,15 @@ async function submitAnswers(autoSubmitReason = null) {
             answer: answers[index]
         }));
         
+        const proctoringData = {
+            warnings: warningCount,
+            warning_history: warningHistory,
+            speaking_time: Math.round(totalSpeakingTime),
+            looking_away_time: Math.round(totalLookingAwayTime),
+            detected_objects: detectedObjects.map(obj => obj.class),
+            exam_duration: startExamTime ? Math.round((Date.now() - startExamTime) / 1000) : 0
+        };
+        
         cleanupProctoring();
         
         const response = await fetch(`${API_BASE_URL}/exams/submit/${currentAttempt.submission_id}`, {
@@ -928,11 +959,7 @@ async function submitAnswers(autoSubmitReason = null) {
             },
             body: JSON.stringify({ 
                 answers: formattedAnswers,
-                proctoring_data: {
-                    warnings: warningCount,
-                    warning_history: warningHistory,
-                    total_time: (currentExam.duration * 60) - timeRemaining
-                }
+                proctoring_data: proctoringData
             })
         });
 
@@ -966,7 +993,6 @@ async function submitAnswers(autoSubmitReason = null) {
     }
 }
 
-// ================= UI HELPER FUNCTIONS =================
 function showLoading(message) {
     const loadingOverlay = document.getElementById("loadingOverlay");
     const loadingMessage = document.getElementById("loadingMessage");
@@ -980,7 +1006,6 @@ function hideLoading() {
     if (loadingOverlay) loadingOverlay.style.display = "none";
 }
 
-// ================= GLOBAL FUNCTION EXPORTS =================
 window.confirmSubmit = async function() {
     closeSubmitConfirm();
     await submitAnswers();
@@ -1014,7 +1039,6 @@ window.nextQuestion = function() {
     }
 };
 
-// Initialize button handlers
 document.addEventListener('DOMContentLoaded', () => {
     const buttons = {
         "submitBtn": () => window.submitExam(),
@@ -1027,7 +1051,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// ================= ORIGINAL EXAM FUNCTIONS =================
 function initializeExamUI() {
     const instructions = document.getElementById("examInstructions");
     const examContainer = document.getElementById("examContainer");
@@ -1195,15 +1218,5 @@ window.submitExam = function() {
         submitOverlay.classList.add("show");
     }
 };
-
-// Handle page unload
-window.addEventListener('beforeunload', function(e) {
-    if (isExamActive) {
-        cleanupProctoring();
-        const message = "Are you sure you want to leave? Your exam will be submitted automatically with violations recorded.";
-        e.returnValue = message;
-        return message;
-    }
-});
 
 console.log("✅ AI Proctoring System fully loaded and ready");
